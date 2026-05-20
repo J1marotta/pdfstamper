@@ -332,6 +332,33 @@ button {
   box-shadow: 0 28px 50px rgba(34, 27, 24, 0.12);
 }
 
+.preview-stamp {
+  position: absolute;
+  left: 28px;
+  right: 28px;
+  bottom: 32px;
+  display: grid;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.preview-stamp.is-left {
+  justify-items: start;
+}
+
+.preview-stamp.is-center {
+  justify-items: center;
+}
+
+.preview-stamp.is-right {
+  justify-items: end;
+}
+
+.preview-stamp-card {
+  width: min(100%, 330px);
+  transform-origin: bottom right;
+}
+
 .preview-hint {
   position: absolute;
   inset: 22px;
@@ -420,22 +447,37 @@ textarea:focus {
   color: var(--ink-soft);
 }
 
-.stamp-preview {
+.stamp-editor-shell {
+  display: grid;
+  gap: 14px;
+}
+
+.stamp-toolbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.stamp-editor-card {
   padding: 18px;
   border-radius: 22px;
   background:
-    linear-gradient(145deg, rgba(255, 248, 241, 0.96), rgba(248, 236, 221, 0.9));
-  border: 1px solid rgba(169, 49, 32, 0.14);
+    linear-gradient(145deg, rgba(255, 248, 241, 0.98), rgba(248, 236, 221, 0.92));
+  border: 1px solid rgba(169, 49, 32, 0.18);
   display: grid;
-  justify-items: start;
   gap: 12px;
-  margin-bottom: 14px;
 }
 
 .stamp-preview-image {
   max-width: min(100%, 240px);
   max-height: 120px;
   object-fit: contain;
+}
+
+.stamp-editor-image,
+.preview-stamp-image {
+  justify-self: end;
 }
 
 .stamp-table-preview {
@@ -445,10 +487,18 @@ textarea:focus {
   box-shadow: inset 0 0 0 1px rgba(169, 49, 32, 0.05);
 }
 
+.stamp-table-preview.is-editor {
+  width: 100%;
+}
+
 .stamp-table-row {
   display: grid;
   grid-template-columns: minmax(108px, 34%) 1fr;
   min-height: 44px;
+}
+
+.stamp-table-row.is-editable {
+  align-items: stretch;
 }
 
 .stamp-table-row + .stamp-table-row {
@@ -467,6 +517,33 @@ textarea:focus {
   color: var(--stamp);
   font-weight: 800;
   line-height: 1.08;
+}
+
+.stamp-table-input-wrap {
+  padding: 6px 8px;
+  display: flex;
+  align-items: stretch;
+}
+
+.stamp-table-input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 6px 8px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 1rem;
+}
+
+.stamp-table-input:focus {
+  box-shadow: inset 0 0 0 2px rgba(169, 49, 32, 0.18);
+  border-radius: 8px;
+}
+
+.stamp-table-input.is-emphasis {
+  font-size: 1.34rem;
+  font-weight: 800;
 }
 
 .stamp-table-value {
@@ -573,6 +650,12 @@ textarea:focus {
   gap: 20px;
 }
 
+.export-actions {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+}
+
 .export-retry-link {
   display: inline-flex;
   margin-top: 8px;
@@ -583,6 +666,17 @@ textarea:focus {
 
 .export-retry-link:hover {
   text-decoration: underline;
+}
+
+.export-button-link {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  text-decoration: none;
+}
+
+.export-secondary-button {
+  align-self: end;
 }
 
 .export-button {
@@ -655,9 +749,15 @@ textarea:focus {
     justify-content: start;
   }
 
-  .stamp-grid,
+  .stamp-toolbar,
   .stack-form {
     grid-template-columns: 1fr;
+  }
+
+  .preview-stamp {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
   }
 
   .export-button {

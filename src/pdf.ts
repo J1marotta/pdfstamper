@@ -16,6 +16,7 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { humanizeFieldName, inferSemanticKey } from './heuristics';
+import { buildStampRows, shouldShowStampImage, shouldShowStampTable } from './stamp';
 import type { PdfFieldModel, StampSettings } from './types';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -310,14 +311,14 @@ function drawStamp(
   const pageWidth = page.getWidth();
   const margin = 20;
   const maxWidth = Math.min(460, pageWidth - margin * 2);
-  const showTable = stamp.mode !== 'image' || !embeddedImage;
+  const showTable = shouldShowStampTable(stamp, Boolean(embeddedImage));
   const rows = showTable ? buildPdfStampRows(stamp) : [];
   const tableHeight = rows.reduce((sum, row) => sum + row.height, 0);
 
   let imageWidth = 0;
   let imageHeight = 0;
 
-  if (embeddedImage && (stamp.mode === 'image' || stamp.mode === 'both')) {
+  if (embeddedImage && shouldShowStampImage(stamp, true)) {
     const ratio = Math.min(
       1,
       Math.min(maxWidth / embeddedImage.width, 120 / embeddedImage.height),
@@ -358,16 +359,14 @@ function buildPdfStampRows(stamp: StampSettings): Array<{
   height: number;
   emphasis?: boolean;
 }> {
-  return [
-    makePdfStampRow(['PAYEE'], wrapText(stamp.payee, 30, 2), 30),
-    makePdfStampRow(['TOTAL AMOUNT', 'PAYABLE'], wrapText(stamp.totalAmount, 22, 1), 38, true),
-    makePdfStampRow(['GST Amount'], wrapText(stamp.gstAmount, 24, 1), 28),
-    makePdfStampRow(['Movement No'], wrapText(stamp.movementNumber, 26, 1), 28),
-    makePdfStampRow(['Signed by :'], wrapText(stamp.signedBy, 30, 2), 32),
-    makePdfStampRow(['Co-signed by -', 'Claims Manager'], wrapText(stamp.coSignedBy, 30, 2), 40),
-    makePdfStampRow(['Approved by 1'], wrapText(stamp.approvedBy1, 30, 2), 30),
-    makePdfStampRow(['Approved by 2'], wrapText(stamp.approvedBy2, 30, 2), 30),
-  ];
+  return buildStampRows(stamp).map((row) =>
+    makePdfStampRow(
+      row.labelLines,
+      wrapText(row.value, row.maxCharsPerLine, row.maxLines),
+      row.minHeight,
+      row.emphasis,
+    ),
+  );
 }
 
 function makePdfStampRow(

@@ -7,6 +7,13 @@ import {
   todayInputValue,
 } from './heuristics';
 import type { LoadedPdfBundle } from './pdf';
+import {
+  buildStampRows,
+  shouldShowStampImage,
+  shouldShowStampOnPage,
+  shouldShowStampTable,
+  syncStampFromProfile,
+} from './stamp';
 import type {
   FillStats,
   PdfFieldModel,
@@ -47,6 +54,7 @@ interface AppElements {
   fieldList: HTMLElement;
   exportPanel: HTMLElement;
   previewFrame: HTMLElement;
+  previewStamp: HTMLElement;
   previewCanvas: HTMLCanvasElement;
   previewHint: HTMLElement;
   previewPageLabel: HTMLElement;
@@ -107,6 +115,7 @@ export class PdfStampStudio {
       fieldList: this.root.querySelector<HTMLElement>('#field-list')!,
       exportPanel: this.root.querySelector<HTMLElement>('#export-panel')!,
       previewFrame: this.root.querySelector<HTMLElement>('#preview-frame')!,
+      previewStamp: this.root.querySelector<HTMLElement>('#preview-stamp')!,
       previewCanvas: this.root.querySelector<HTMLCanvasElement>('#preview-canvas')!,
       previewHint: this.root.querySelector<HTMLElement>('#preview-hint')!,
       previewPageLabel: this.root.querySelector<HTMLElement>('#preview-page-label')!,
@@ -194,6 +203,7 @@ export class PdfStampStudio {
       if (this.state.busy) {
         return;
       }
+      this.invalidateLastExport();
       this.state.overwriteExisting = this.elements.overwriteToggle.checked;
       this.reapplyProfile();
     });
@@ -219,6 +229,7 @@ export class PdfStampStudio {
         [key]: target.value,
       };
 
+      this.invalidateLastExport();
       this.state.profile = nextProfile;
       this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
 
@@ -258,6 +269,7 @@ export class PdfStampStudio {
         autoFilled: false,
       };
 
+      this.invalidateLastExport();
       this.state.fields = this.state.fields.map((candidate) =>
         candidate.id === fieldId ? updatedField : candidate,
       );
@@ -308,6 +320,7 @@ export class PdfStampStudio {
         ...this.state.stamp,
         [key]: nextValue,
       };
+      this.invalidateLastExport();
       this.renderStampControls();
     });
 
@@ -339,6 +352,7 @@ export class PdfStampStudio {
 
       const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
       if (action === 'clear-stamp-image') {
+        this.invalidateLastExport();
         this.clearStampImage();
         this.renderStampControls();
       }
@@ -480,6 +494,7 @@ export class PdfStampStudio {
       return;
     }
 
+    this.invalidateLastExport();
     this.clearStampImage();
     this.state.stamp = {
       ...this.state.stamp,
@@ -520,7 +535,7 @@ export class PdfStampStudio {
       this.setLastExport(blob, outputName);
       downloadBlob(blob, outputName);
       this.setNotice(
-        'Export complete. If your browser blocked the automatic download, use the retry link below.',
+        'Stamped PDF is ready. If the automatic download was blocked, use the download action below.',
         'success',
       );
     } catch (error) {
@@ -685,103 +700,71 @@ export class PdfStampStudio {
     const stamp = this.state.stamp;
     const rows = buildStampRows(stamp);
     const disabledAttr = this.state.busy ? 'disabled' : '';
+    const hasImage = Boolean(this.state.stampImageUrl);
+    const showTable = shouldShowStampTable(stamp, hasImage);
+    const showImage = shouldShowStampImage(stamp, hasImage);
 
     this.updateContainerMarkup(this.elements.stampControls, `
-      <div class="stamp-preview ${stamp.mode === 'image' ? 'is-image-only' : ''}">
-        ${
-          this.state.stampImageUrl && (stamp.mode === 'image' || stamp.mode === 'both')
-            ? `<img class="stamp-preview-image" src="${this.state.stampImageUrl}" alt="Stamp preview" />`
-            : ''
-        }
-        ${
-          stamp.mode === 'image' && this.state.stampImageUrl
-            ? ''
-            : `
-              <div class="stamp-table-preview">
-                ${rows.map((row) => renderStampPreviewRow(row.label, row.value, row.emphasis)).join('')}
-              </div>
-            `
-        }
-      </div>
-      <div class="stamp-grid">
-        <label class="stack-field compact-field">
-          <span class="field-heading">Mode</span>
-          <select data-stamp-key="mode" ${disabledAttr}>
-            ${selectOption('text', 'Table stamp', stamp.mode)}
-            ${selectOption('image', 'Image only', stamp.mode)}
-            ${selectOption('both', 'Image + table', stamp.mode)}
-          </select>
-        </label>
-        <label class="stack-field compact-field">
-          <span class="field-heading">Placement</span>
-          <select data-stamp-key="placement" ${disabledAttr}>
-            ${selectOption('last-page', 'Last page', stamp.placement)}
-            ${selectOption('every-page', 'Every page', stamp.placement)}
-          </select>
-        </label>
-        <label class="stack-field compact-field">
-          <span class="field-heading">Alignment</span>
-          <select data-stamp-key="alignment" ${disabledAttr}>
-            ${selectOption('left', 'Left', stamp.alignment)}
-            ${selectOption('center', 'Center', stamp.alignment)}
-            ${selectOption('right', 'Right', stamp.alignment)}
-          </select>
-        </label>
-        <label class="stack-field compact-field">
-          <span class="field-heading">Stamp date</span>
-          <input data-stamp-key="date" type="date" value="${escapeAttribute(stamp.date)}" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Payee</span>
-          <input data-stamp-key="payee" type="text" value="${escapeAttribute(stamp.payee)}" placeholder="Recipient or payee" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Total amount payable</span>
-          <input data-stamp-key="totalAmount" type="text" value="${escapeAttribute(stamp.totalAmount)}" placeholder="$7,516.30" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">GST amount</span>
-          <input data-stamp-key="gstAmount" type="text" value="${escapeAttribute(stamp.gstAmount)}" placeholder="$683.30" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Movement No</span>
-          <input data-stamp-key="movementNumber" type="text" value="${escapeAttribute(stamp.movementNumber)}" placeholder="202603/01" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Signed by</span>
-          <input data-stamp-key="signedBy" type="text" value="${escapeAttribute(stamp.signedBy)}" placeholder="Primary approver" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Co-signed by / Claims Manager</span>
-          <input data-stamp-key="coSignedBy" type="text" value="${escapeAttribute(stamp.coSignedBy)}" placeholder="Secondary approver" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Approved by 1</span>
-          <input data-stamp-key="approvedBy1" type="text" value="${escapeAttribute(stamp.approvedBy1)}" placeholder="Approver name" ${disabledAttr} />
-        </label>
-        <label class="stack-field">
-          <span class="field-heading">Approved by 2</span>
-          <input data-stamp-key="approvedBy2" type="text" value="${escapeAttribute(stamp.approvedBy2)}" placeholder="Approver name" ${disabledAttr} />
-        </label>
-        <label class="stack-field stack-span-full">
-          <span class="field-heading">Optional image stamp</span>
-          <input type="file" accept="image/png,image/jpeg" ${disabledAttr} />
-          <span class="field-help">PNG or JPG only. Useful if you want the exact physical stamp artwork layered under or over the table.</span>
-        </label>
+      <div class="stamp-editor-shell">
+        <div class="section-copy">
+          Edit the values directly inside the stamp. The same layout is used for the on-page preview and for export.
+        </div>
+        <div class="stamp-toolbar">
+          <label class="stack-field compact-field">
+            <span class="field-heading">Mode</span>
+            <select data-stamp-key="mode" ${disabledAttr}>
+              ${selectOption('text', 'Table stamp', stamp.mode)}
+              ${selectOption('image', 'Image only', stamp.mode)}
+              ${selectOption('both', 'Image + table', stamp.mode)}
+            </select>
+          </label>
+          <label class="stack-field compact-field">
+            <span class="field-heading">Placement</span>
+            <select data-stamp-key="placement" ${disabledAttr}>
+              ${selectOption('last-page', 'Last page', stamp.placement)}
+              ${selectOption('every-page', 'Every page', stamp.placement)}
+            </select>
+          </label>
+          <label class="stack-field compact-field">
+            <span class="field-heading">Alignment</span>
+            <select data-stamp-key="alignment" ${disabledAttr}>
+              ${selectOption('left', 'Left', stamp.alignment)}
+              ${selectOption('center', 'Center', stamp.alignment)}
+              ${selectOption('right', 'Right', stamp.alignment)}
+            </select>
+          </label>
+          <label class="stack-field compact-field">
+            <span class="field-heading">Stamp date</span>
+            <input data-stamp-key="date" type="date" value="${escapeAttribute(stamp.date)}" ${disabledAttr} />
+          </label>
+          <label class="stack-field compact-field stamp-upload-field">
+            <span class="field-heading">Optional image stamp</span>
+            <input type="file" accept="image/png,image/jpeg" ${disabledAttr} />
+          </label>
+          <label class="toggle stamp-toggle">
+            <input data-stamp-key="flatten" type="checkbox" ${stamp.flatten ? 'checked' : ''} ${disabledAttr} />
+            Flatten form fields after export
+          </label>
+        </div>
+        <div class="stamp-editor-card">
+          ${showTable ? renderStampTable(rows, { editable: true, disabled: this.state.busy }) : ''}
+          ${
+            showImage && this.state.stampImageUrl
+              ? `<img class="stamp-preview-image stamp-editor-image" src="${this.state.stampImageUrl}" alt="Stamp image preview" />`
+              : ''
+          }
+        </div>
         ${
           stamp.imageName
-            ? `<div class="stamp-image-meta stack-span-full">
+            ? `<div class="stamp-image-meta">
                 <span>Loaded image: ${escapeHtml(stamp.imageName)}</span>
                 <button type="button" class="quiet-button" data-action="clear-stamp-image" ${disabledAttr}>Remove image</button>
               </div>`
             : ''
         }
-        <label class="toggle stack-span-full">
-          <input data-stamp-key="flatten" type="checkbox" ${stamp.flatten ? 'checked' : ''} ${disabledAttr} />
-          Flatten form fields after export
-        </label>
       </div>
     `);
+    this.renderPreviewStamp();
   }
 
   private renderFieldList(): void {
@@ -840,11 +823,28 @@ export class PdfStampStudio {
   private renderExportPanel(): void {
     const disabled = !this.state.bundle || this.state.busy;
     const nextOutputName = this.state.bundle ? outputFileName(this.state.bundle.fileName) : 'your-file-stamped.pdf';
-    const retryLink =
+    const readyToDownload =
       this.state.lastExportUrl && this.state.lastExportName
         ? `
-          <a class="export-retry-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" target="_blank" rel="noopener">
-            Save latest export again
+          <div class="export-actions">
+            <a class="export-button export-button-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
+              Download stamped PDF
+            </a>
+            <button type="button" class="quiet-button export-secondary-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
+              Regenerate with latest edits
+            </button>
+          </div>
+        `
+        : `
+          <button type="button" class="export-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
+            ${this.state.busy ? 'Working...' : 'Generate stamped PDF'}
+          </button>
+        `;
+    const statusLine =
+      this.state.lastExportUrl && this.state.lastExportName
+        ? `
+          <a class="export-retry-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
+            Open the latest stamped PDF again
           </a>
         `
         : '';
@@ -854,11 +854,9 @@ export class PdfStampStudio {
           <h3>Export a local copy</h3>
           <p>The source file stays untouched. You download a fresh PDF with the filled fields and stamp baked in.</p>
           <p class="subtle-copy">Output: ${escapeHtml(nextOutputName)}</p>
-          ${retryLink}
+          ${statusLine}
         </div>
-        <button type="button" class="export-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-          ${this.state.busy ? 'Working...' : 'Download stamped PDF'}
-        </button>
+        ${readyToDownload}
       </div>
     `);
   }
@@ -870,6 +868,7 @@ export class PdfStampStudio {
       this.elements.prevPageButton.disabled = true;
       this.elements.nextPageButton.disabled = true;
       this.elements.previewFrame.classList.remove('is-loading', 'has-preview');
+      this.elements.previewStamp.hidden = true;
       this.elements.previewCanvas.hidden = true;
       this.elements.previewHint.hidden = false;
       this.elements.previewHint.textContent = 'PDF preview will appear here';
@@ -880,6 +879,7 @@ export class PdfStampStudio {
     this.elements.previewFileMeta.textContent = `${this.state.bundle.fields.length} detected field${this.state.bundle.fields.length === 1 ? '' : 's'}`;
     this.elements.prevPageButton.disabled = this.state.previewPage <= 1 || this.state.busy;
     this.elements.nextPageButton.disabled = this.state.previewPage >= this.state.bundle.pageCount || this.state.busy;
+    this.renderPreviewStamp();
   }
 
   private async renderPreview(): Promise<void> {
@@ -913,6 +913,7 @@ export class PdfStampStudio {
       if (!hadPreview) {
         this.elements.previewCanvas.hidden = true;
         this.elements.previewFrame.classList.remove('has-preview');
+        this.elements.previewStamp.hidden = true;
       }
       this.elements.previewHint.hidden = false;
       this.elements.previewHint.textContent = 'Preview failed for this page';
@@ -968,6 +969,15 @@ export class PdfStampStudio {
     this.state.lastExportName = null;
   }
 
+  private invalidateLastExport(): void {
+    if (!this.state.lastExportUrl) {
+      return;
+    }
+
+    this.clearLastExport();
+    this.renderExportPanel();
+  }
+
   private schedulePreviewRender(): void {
     if (this.previewResizeFrame !== null) {
       window.cancelAnimationFrame(this.previewResizeFrame);
@@ -991,6 +1001,35 @@ export class PdfStampStudio {
     restoreContainerRenderState(container, renderState);
   }
 
+  private renderPreviewStamp(): void {
+    if (
+      !this.state.bundle ||
+      !shouldShowStampOnPage(this.state.stamp, this.state.previewPage, this.state.bundle.pageCount)
+    ) {
+      this.elements.previewStamp.hidden = true;
+      this.elements.previewStamp.innerHTML = '';
+      return;
+    }
+
+    const hasImage = Boolean(this.state.stampImageUrl);
+    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
+    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
+    const rows = buildStampRows(this.state.stamp);
+
+    this.elements.previewStamp.className = `preview-stamp is-${this.state.stamp.alignment}`;
+    this.elements.previewStamp.hidden = false;
+    this.updateContainerMarkup(this.elements.previewStamp, `
+      <div class="preview-stamp-card">
+        ${showTable ? renderStampTable(rows, { editable: false }) : ''}
+        ${
+          showImage && this.state.stampImageUrl
+            ? `<img class="stamp-preview-image preview-stamp-image" src="${this.state.stampImageUrl}" alt="Preview stamp image" />`
+            : ''
+        }
+      </div>
+    `);
+  }
+
   private renderControlState(): void {
     this.elements.dropzone.disabled = this.state.busy;
     this.elements.dropzone.setAttribute('aria-busy', String(this.state.busy));
@@ -999,6 +1038,7 @@ export class PdfStampStudio {
 
   private showPreviewHint(message: string): void {
     this.elements.previewFrame.classList.add('is-loading');
+    this.elements.previewStamp.hidden = true;
     this.elements.previewHint.hidden = false;
     this.elements.previewHint.textContent = message;
   }
@@ -1054,6 +1094,7 @@ function shellMarkup(): string {
           </div>
           <div id="preview-frame" class="preview-frame">
             <canvas id="preview-canvas" hidden></canvas>
+            <div id="preview-stamp" class="preview-stamp" hidden></div>
             <div id="preview-hint" class="preview-hint">PDF preview will appear here</div>
           </div>
         </section>
@@ -1125,59 +1166,56 @@ function defaultStampSettings(): StampSettings {
   };
 }
 
-function buildStampRows(stamp: StampSettings): Array<{ label: string; value: string; emphasis?: boolean }> {
-  return [
-    { label: 'PAYEE', value: stamp.payee },
-    { label: 'TOTAL AMOUNT\nPAYABLE', value: stamp.totalAmount, emphasis: true },
-    { label: 'GST Amount', value: stamp.gstAmount },
-    { label: 'Movement No', value: stamp.movementNumber },
-    { label: 'Signed by :', value: stamp.signedBy },
-    { label: 'Co-signed by -\nClaims Manager', value: stamp.coSignedBy },
-    { label: 'Approved by 1', value: stamp.approvedBy1 },
-    { label: 'Approved by 2', value: stamp.approvedBy2 },
-  ];
-}
-
-function renderStampPreviewRow(label: string, value: string, emphasis = false): string {
-  const labelHtml = escapeHtml(label).replace(/\n/g, '<br />');
-  const valueClass = emphasis ? 'stamp-table-value is-emphasis' : 'stamp-table-value';
+function renderStampTable(
+  rows: ReturnType<typeof buildStampRows>,
+  options: { editable: boolean; disabled?: boolean },
+): string {
   return `
-    <div class="stamp-table-row">
-      <div class="stamp-table-label">${labelHtml}</div>
-      <div class="${valueClass}">${escapeHtml(value)}</div>
+    <div class="stamp-table-preview ${options.editable ? 'is-editor' : ''}">
+      ${rows
+        .map((row) =>
+          options.editable
+            ? renderEditableStampRow(row, options.disabled ?? false)
+            : renderReadonlyStampRow(row),
+        )
+        .join('')}
     </div>
   `;
 }
 
-function derivePayeeFromProfile(profile: ProfileValues): string {
-  return profile.company || profile.fullName || '';
+function renderEditableStampRow(
+  row: ReturnType<typeof buildStampRows>[number],
+  disabled: boolean,
+): string {
+  const disabledAttr = disabled ? 'disabled' : '';
+  const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
+  const inputClass = row.emphasis ? 'stamp-table-input is-emphasis' : 'stamp-table-input';
+  return `
+    <label class="stamp-table-row is-editable">
+      <span class="stamp-table-label">${labelHtml}</span>
+      <span class="stamp-table-input-wrap">
+        <input
+          class="${inputClass}"
+          data-stamp-key="${row.key}"
+          type="text"
+          value="${escapeAttribute(row.value)}"
+          placeholder="${escapeAttribute(row.placeholder)}"
+          ${disabledAttr}
+        />
+      </span>
+    </label>
+  `;
 }
 
-function deriveSignerFromProfile(profile: ProfileValues): string {
-  return profile.signatureName || profile.fullName || '';
-}
-
-function syncStampFromProfile(
-  previousProfile: ProfileValues,
-  nextProfile: ProfileValues,
-  stamp: StampSettings,
-): StampSettings {
-  const previousPayee = derivePayeeFromProfile(previousProfile);
-  const nextPayee = derivePayeeFromProfile(nextProfile);
-  const previousSignedBy = deriveSignerFromProfile(previousProfile);
-  const nextSignedBy = deriveSignerFromProfile(nextProfile);
-  const previousMovement = previousProfile.reference || '';
-  const nextMovement = nextProfile.reference || '';
-
-  return {
-    ...stamp,
-    payee: shouldSyncStamp(stamp.payee, previousPayee) ? nextPayee : stamp.payee,
-    signedBy: shouldSyncStamp(stamp.signedBy, previousSignedBy) ? nextSignedBy : stamp.signedBy,
-    movementNumber: shouldSyncStamp(stamp.movementNumber, previousMovement)
-      ? nextMovement
-      : stamp.movementNumber,
-    date: nextProfile.date || stamp.date,
-  };
+function renderReadonlyStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
+  const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
+  const valueClass = row.emphasis ? 'stamp-table-value is-emphasis' : 'stamp-table-value';
+  return `
+    <div class="stamp-table-row">
+      <div class="stamp-table-label">${labelHtml}</div>
+      <div class="${valueClass}">${escapeHtml(row.value)}</div>
+    </div>
+  `;
 }
 
 function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
@@ -1208,10 +1246,6 @@ function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
   }
 
   return `<input data-field-id="${field.id}" type="text" value="${escapeAttribute(typeof field.value === 'string' ? field.value : '')}" ${disabledAttr} />`;
-}
-
-function shouldSyncStamp(currentStampValue: string, previousProfileValue: string): boolean {
-  return !currentStampValue || currentStampValue === previousProfileValue;
 }
 
 function cloneStampSettings(stamp: StampSettings): StampSettings {
