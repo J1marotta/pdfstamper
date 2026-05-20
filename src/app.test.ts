@@ -8,20 +8,21 @@ describe('PdfStampStudio shell', () => {
     document.body.innerHTML = '';
   });
 
-  it('renders the stamp editor inline and reserves a preview stamp overlay', () => {
+  it('renders the page-first shell with a centered preview and floating inspector', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
 
     expect(root).not.toBeNull();
     new PdfStampStudio(root!);
 
-    expect(document.querySelector('#preview-stamp')).not.toBeNull();
+    expect(document.querySelector('#upload-button')).not.toBeNull();
+    expect(document.querySelector('#preview-frame')).not.toBeNull();
+    expect(document.querySelector('#thumbnail-rail')).not.toBeNull();
     expect(document.querySelector('#stamp-controls')).not.toBeNull();
-    expect(document.querySelector('#stamp-controls .stamp-toolbar')).not.toBeNull();
-    expect(document.querySelector('#stamp-controls .stamp-table-input[data-stamp-key="payee"]')).not.toBeNull();
+    expect(document.querySelector('#advanced-sheet')).not.toBeNull();
   });
 
-  it('shows a visible download action after an export is ready', () => {
+  it('shows the placed stamp overlay on the active page', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
 
@@ -29,58 +30,51 @@ describe('PdfStampStudio shell', () => {
     const studio = new PdfStampStudio(root!);
     const internalStudio = studio as unknown as {
       state: {
-        bundle: { fileName: string } | null;
-        busy: boolean;
-        lastExportUrl: string | null;
-        lastExportName: string | null;
-      };
-      renderExportPanel: () => void;
-    };
-
-    internalStudio.state.bundle = { fileName: 'resume.pdf' };
-    internalStudio.state.busy = false;
-    internalStudio.state.lastExportUrl = 'blob:test-url';
-    internalStudio.state.lastExportName = 'resume-stamped.pdf';
-    internalStudio.renderExportPanel();
-
-    const primaryLink = document.querySelector('.export-button-link') as HTMLAnchorElement | null;
-    expect(primaryLink).not.toBeNull();
-    expect(primaryLink?.download).toBe('resume-stamped.pdf');
-    expect(primaryLink?.textContent).toContain('Download stamped PDF');
-  });
-
-  it('renders the preview overlay from the same stamp values used by the inline editor', () => {
-    document.body.innerHTML = '<div id="app"></div>';
-    const root = document.getElementById('app');
-
-    expect(root).not.toBeNull();
-    const studio = new PdfStampStudio(root!);
-    const internalStudio = studio as unknown as {
-      state: {
-        bundle: { fileName: string; fields: unknown[]; pageCount: number } | null;
-        previewPage: number;
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
         stamp: {
           payee: string;
           totalAmount: string;
-          placement: 'last-page' | 'every-page';
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
       };
       renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
     };
 
     internalStudio.state.bundle = {
       fileName: 'resume.pdf',
-      fields: [],
-      pageCount: 2,
+      pageCount: 1,
     };
-    internalStudio.state.previewPage = 2;
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = false;
     internalStudio.state.stamp = {
       ...internalStudio.state.stamp,
       payee: 'Acme Pty Ltd',
       totalAmount: '$100.00',
-      placement: 'last-page',
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
     };
+
     internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
 
     const previewStamp = document.querySelector('#preview-stamp') as HTMLElement | null;
     expect(previewStamp).not.toBeNull();
@@ -89,7 +83,7 @@ describe('PdfStampStudio shell', () => {
     expect(previewStamp?.textContent).toContain('$100.00');
   });
 
-  it('clears the stale download link after an inline stamp edit', () => {
+  it('clears a stale download link after direct stamp editing', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
 
@@ -98,19 +92,55 @@ describe('PdfStampStudio shell', () => {
     const studio = new PdfStampStudio(root!);
     const internalStudio = studio as unknown as {
       state: {
-        bundle: { fileName: string } | null;
-        busy: boolean;
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
         lastExportUrl: string | null;
         lastExportName: string | null;
+        stamp: {
+          payee: string;
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
       };
       renderExportPanel: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
     };
 
-    internalStudio.state.bundle = { fileName: 'resume.pdf' };
-    internalStudio.state.busy = false;
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
     internalStudio.state.lastExportUrl = 'blob:stale-export';
     internalStudio.state.lastExportName = 'resume-stamped.pdf';
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      payee: 'Original payee',
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+
     internalStudio.renderExportPanel();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
 
     const payeeInput = document.querySelector(
       '.stamp-table-input[data-stamp-key="payee"]',
@@ -121,7 +151,7 @@ describe('PdfStampStudio shell', () => {
     payeeInput!.dispatchEvent(new Event('input', { bubbles: true }));
 
     expect(revokeSpy).toHaveBeenCalledWith('blob:stale-export');
-    expect(document.querySelector('.export-button-link')).toBeNull();
-    expect(document.querySelector('.export-button')?.textContent).toContain('Generate stamped PDF');
+    expect(document.querySelector('.action-button[href]')).toBeNull();
+    expect(document.querySelector('#export-actions')?.textContent).toContain('Export stamped PDF');
   });
 });

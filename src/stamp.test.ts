@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildStampRows,
+  isStampPlaced,
   shouldShowStampImage,
   shouldShowStampOnPage,
   shouldShowStampTable,
@@ -21,8 +22,13 @@ function makeStamp(overrides: Partial<StampSettings> = {}): StampSettings {
     approvedBy1: '',
     approvedBy2: '',
     date: '2026-05-20',
-    placement: 'last-page',
-    alignment: 'right',
+    placement: {
+      pageId: null,
+      x: 0.5,
+      y: 0.7,
+      width: 0.52,
+      rotation: 0,
+    },
     flatten: false,
     imageBytes: null,
     imageMime: null,
@@ -96,14 +102,24 @@ describe('stamp helpers', () => {
     expect(preserved.movementNumber).toBe('Custom Reference');
   });
 
-  it('matches preview visibility rules to placement and image mode', () => {
+  it('matches page placement and image visibility rules', () => {
     const imageOnly = makeStamp({ mode: 'image' });
+    const placed = makeStamp({
+      placement: {
+        pageId: 'blank-1',
+        x: 0.44,
+        y: 0.68,
+        width: 0.42,
+        rotation: 18,
+      },
+    });
 
     expect(shouldShowStampTable(imageOnly, false)).toBe(true);
     expect(shouldShowStampTable(imageOnly, true)).toBe(false);
     expect(shouldShowStampImage(imageOnly, true)).toBe(true);
-    expect(shouldShowStampOnPage(makeStamp({ placement: 'last-page' }), 1, 2)).toBe(false);
-    expect(shouldShowStampOnPage(makeStamp({ placement: 'last-page' }), 2, 2)).toBe(true);
-    expect(shouldShowStampOnPage(makeStamp({ placement: 'every-page' }), 1, 2)).toBe(true);
+    expect(isStampPlaced(makeStamp())).toBe(false);
+    expect(isStampPlaced(placed)).toBe(true);
+    expect(shouldShowStampOnPage(placed, 'pdf-1')).toBe(false);
+    expect(shouldShowStampOnPage(placed, 'blank-1')).toBe(true);
   });
 });

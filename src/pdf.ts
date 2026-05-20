@@ -10,14 +10,15 @@ import {
   PDFTextField,
   PDFFont,
   StandardFonts,
+  degrees,
   rgb,
 } from 'pdf-lib';
 import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { humanizeFieldName, inferSemanticKey } from './heuristics';
-import { buildStampRows, shouldShowStampImage, shouldShowStampTable } from './stamp';
-import type { PdfFieldModel, StampSettings } from './types';
+import { buildStampRows, isStampPlaced, shouldShowStampImage, shouldShowStampTable } from './stamp';
+import type { DocumentPageModel, PageSize, PdfFieldModel, StampSettings } from './types';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -28,6 +29,7 @@ export interface LoadedPdfBundle {
   sourceBytes: Uint8Array;
   previewDocument: PreviewDocument;
   pageCount: number;
+  pageSizes: PageSize[];
   textDigest: string;
   fields: PdfFieldModel[];
 }
@@ -47,6 +49,10 @@ export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
 
   const fields = extractFields(editableDocument);
   const pageCount = previewDocument.numPages;
+  const pageSizes = editableDocument.getPages().map((page) => ({
+    width: page.getWidth(),
+    height: page.getHeight(),
+  }));
   const textDigest = await extractTextDigest(previewDocument, Math.min(pageCount, 6));
 
   return {
@@ -54,6 +60,7 @@ export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
     sourceBytes,
     previewDocument,
     pageCount,
+    pageSizes,
     textDigest,
     fields,
   };
@@ -95,6 +102,7 @@ export async function exportFilledPdf(
   sourceBytes: Uint8Array,
   fields: PdfFieldModel[],
   stamp: StampSettings,
+  pages: DocumentPageModel[],
 ): Promise<Blob> {
   const document = await PDFDocument.load(sourceBytes, {
     ignoreEncryption: true,
@@ -103,6 +111,7 @@ export async function exportFilledPdf(
   const form = document.getForm();
   const regularFont = await document.embedFont(StandardFonts.Helvetica);
   const boldFont = await document.embedFont(StandardFonts.HelveticaBold);
+  const sourcePages = [...document.getPages()];
 
   applyFieldValues(form, fields);
 
@@ -121,12 +130,28 @@ export async function exportFilledPdf(
   }
 
   const embeddedImage = await embedStampImage(document, stamp);
-  const pages = document.getPages();
-  const targetPages = stamp.placement === 'every-page' ? pages : pages.slice(-1);
+  const pageMap = new Map<string, PDFPage>();
+  let documentIndex = 0;
 
-  targetPages.forEach((page) => {
-    drawStamp(page, stamp, boldFont, regularFont, embeddedImage);
+  pages.forEach((pageModel) => {
+    if (pageModel.kind === 'blank') {
+      const blankPage = document.insertPage(documentIndex, [pageModel.width, pageModel.height]);
+      pageMap.set(pageModel.id, blankPage);
+    } else {
+      const sourcePage = sourcePages[pageModel.pageNumber - 1];
+      if (sourcePage) {
+        pageMap.set(pageModel.id, sourcePage);
+      }
+    }
+    documentIndex += 1;
   });
+
+  if (isStampPlaced(stamp)) {
+    const targetPage = pageMap.get(stamp.placement.pageId!);
+    if (targetPage) {
+      drawStamp(targetPage, stamp, boldFont, regularFont, embeddedImage);
+    }
+  }
 
   const bytes = await document.save();
   const pdfBuffer = new ArrayBuffer(bytes.byteLength);
@@ -308,12 +333,18 @@ function drawStamp(
   regularFont: PDFFont,
   embeddedImage: PDFImage | null,
 ): void {
+  if (!isStampPlaced(stamp)) {
+    return;
+  }
+
   const pageWidth = page.getWidth();
-  const margin = 20;
-  const maxWidth = Math.min(460, pageWidth - margin * 2);
+  const pageHeight = page.getHeight();
+  const margin = 18;
+  const maxWidth = Math.max(220, Math.min(pageWidth - margin * 2, pageWidth * stamp.placement.width));
+  const scale = maxWidth / 460;
   const showTable = shouldShowStampTable(stamp, Boolean(embeddedImage));
   const rows = showTable ? buildPdfStampRows(stamp) : [];
-  const tableHeight = rows.reduce((sum, row) => sum + row.height, 0);
+  const tableHeight = rows.reduce((sum, row) => sum + row.height * scale, 0);
 
   let imageWidth = 0;
   let imageHeight = 0;
@@ -321,35 +352,50 @@ function drawStamp(
   if (embeddedImage && shouldShowStampImage(stamp, true)) {
     const ratio = Math.min(
       1,
-      Math.min(maxWidth / embeddedImage.width, 120 / embeddedImage.height),
+      Math.min(maxWidth / embeddedImage.width, (160 * scale) / embeddedImage.height),
     );
     imageWidth = embeddedImage.width * ratio;
     imageHeight = embeddedImage.height * ratio;
   }
 
-  const gap = tableHeight > 0 && imageHeight > 0 ? 10 : 0;
+  const gap = tableHeight > 0 && imageHeight > 0 ? 10 * scale : 0;
   const blockWidth = Math.max(tableHeight > 0 ? maxWidth : 0, imageWidth);
   const blockHeight = tableHeight + gap + imageHeight;
-  const x = alignedX(pageWidth, blockWidth, stamp.alignment, margin);
-  const y = margin;
+  const centerX = clampValue(pageWidth * stamp.placement.x, blockWidth / 2 + margin, pageWidth - blockWidth / 2 - margin);
+  const centerY = clampValue(
+    pageHeight * (1 - stamp.placement.y),
+    blockHeight / 2 + margin,
+    pageHeight - blockHeight / 2 - margin,
+  );
+  const x = centerX - blockWidth / 2;
+  const y = centerY - blockHeight / 2;
+  const rotation = stamp.placement.rotation;
 
   if (tableHeight > 0) {
-    drawStampTable(page, x, y, maxWidth, rows, boldFont, regularFont);
+    drawStampTable(page, x, y, maxWidth, rows, boldFont, regularFont, scale, centerX, centerY, rotation);
   }
 
   if (embeddedImage && imageWidth > 0 && imageHeight > 0) {
+    const imageOrigin = rotatePoint(
+      x + (blockWidth - imageWidth) / 2,
+      y + tableHeight + gap,
+      centerX,
+      centerY,
+      rotation,
+    );
     page.drawImage(embeddedImage, {
-      x: x + (blockWidth - imageWidth) / 2,
-      y: y + tableHeight + gap,
+      x: imageOrigin.x,
+      y: imageOrigin.y,
       width: imageWidth,
       height: imageHeight,
       opacity: 0.96,
+      rotate: degrees(rotation),
     });
   }
 
   if (blockHeight === 0) {
     const fallbackRows = buildPdfStampRows(stamp);
-    drawStampTable(page, x, y, maxWidth, fallbackRows, boldFont, regularFont);
+    drawStampTable(page, x, y, maxWidth, fallbackRows, boldFont, regularFont, scale, centerX, centerY, rotation);
   }
 }
 
@@ -398,24 +444,32 @@ function drawStampTable(
   rows: Array<{ labelLines: string[]; valueLines: string[]; height: number; emphasis?: boolean }>,
   boldFont: PDFFont,
   regularFont: PDFFont,
+  scale: number,
+  centerX: number,
+  centerY: number,
+  rotation: number,
 ): void {
-  const totalHeight = rows.reduce((sum, row) => sum + row.height, 0);
+  const totalHeight = rows.reduce((sum, row) => sum + row.height * scale, 0);
   const labelWidth = Math.min(145, width * 0.34);
+  const outerOrigin = rotatePoint(x, y, centerX, centerY, rotation);
 
   page.drawRectangle({
-    x,
-    y,
+    x: outerOrigin.x,
+    y: outerOrigin.y,
     width,
     height: totalHeight,
     color: rgb(1, 1, 1),
     opacity: 0.97,
     borderColor: STAMP_RED,
     borderWidth: 1.15,
+    rotate: degrees(rotation),
   });
 
+  const dividerStart = rotatePoint(x + labelWidth, y, centerX, centerY, rotation);
+  const dividerEnd = rotatePoint(x + labelWidth, y + totalHeight, centerX, centerY, rotation);
   page.drawLine({
-    start: { x: x + labelWidth, y },
-    end: { x: x + labelWidth, y: y + totalHeight },
+    start: dividerStart,
+    end: dividerEnd,
     color: STAMP_RED,
     thickness: 1,
   });
@@ -423,60 +477,63 @@ function drawStampTable(
   let cursorTop = y + totalHeight;
 
   rows.forEach((row, index) => {
-    const rowBottom = cursorTop - row.height;
+    const scaledRowHeight = row.height * scale;
+    const rowBottom = cursorTop - scaledRowHeight;
 
     if (index < rows.length - 1) {
+      const rowStart = rotatePoint(x, rowBottom, centerX, centerY, rotation);
+      const rowEnd = rotatePoint(x + width, rowBottom, centerX, centerY, rotation);
       page.drawLine({
-        start: { x, y: rowBottom },
-        end: { x: x + width, y: rowBottom },
+        start: rowStart,
+        end: rowEnd,
         color: STAMP_RED,
         thickness: 1,
       });
     }
 
-    const labelStartY = rowBottom + row.height - 12;
+    const labelSize = 8.6 * scale;
+    const valueSize = (row.emphasis ? 12.8 : 11.4) * scale;
+    const labelStartY = rowBottom + scaledRowHeight - 12 * scale;
     row.labelLines.forEach((line, lineIndex) => {
+      const labelOrigin = rotatePoint(
+        x + 8 * scale,
+        labelStartY - lineIndex * 10 * scale,
+        centerX,
+        centerY,
+        rotation,
+      );
       page.drawText(line, {
-        x: x + 8,
-        y: labelStartY - lineIndex * 10,
-        size: 8.6,
+        x: labelOrigin.x,
+        y: labelOrigin.y,
+        size: labelSize,
         font: boldFont,
         color: STAMP_RED,
+        rotate: degrees(rotation),
       });
     });
 
     const valueFont = row.emphasis ? boldFont : regularFont;
-    const valueSize = row.emphasis ? 12.8 : 11.4;
-    const valueStartY = rowBottom + row.height - (row.emphasis ? 15 : 13);
+    const valueStartY = rowBottom + scaledRowHeight - (row.emphasis ? 15 : 13) * scale;
     row.valueLines.forEach((line, lineIndex) => {
+      const valueOrigin = rotatePoint(
+        x + labelWidth + 10 * scale,
+        valueStartY - lineIndex * (valueSize + scale),
+        centerX,
+        centerY,
+        rotation,
+      );
       page.drawText(line, {
-        x: x + labelWidth + 10,
-        y: valueStartY - lineIndex * (valueSize + 1),
+        x: valueOrigin.x,
+        y: valueOrigin.y,
         size: valueSize,
         font: valueFont,
         color: INK,
+        rotate: degrees(rotation),
       });
     });
 
     cursorTop = rowBottom;
   });
-}
-
-function alignedX(
-  pageWidth: number,
-  blockWidth: number,
-  alignment: StampSettings['alignment'],
-  margin: number,
-): number {
-  if (alignment === 'left') {
-    return margin;
-  }
-
-  if (alignment === 'center') {
-    return (pageWidth - blockWidth) / 2;
-  }
-
-  return pageWidth - blockWidth - margin;
 }
 
 function wrapText(text: string, maxCharsPerLine: number, maxLines: number): string[] {
@@ -513,4 +570,28 @@ function wrapText(text: string, maxCharsPerLine: number, maxLines: number): stri
     }
     return line;
   });
+}
+
+function rotatePoint(
+  x: number,
+  y: number,
+  centerX: number,
+  centerY: number,
+  rotation: number,
+): { x: number; y: number } {
+  if (rotation === 0) {
+    return { x, y };
+  }
+
+  const radians = (rotation * Math.PI) / 180;
+  const translatedX = x - centerX;
+  const translatedY = y - centerY;
+  return {
+    x: centerX + translatedX * Math.cos(radians) - translatedY * Math.sin(radians),
+    y: centerY + translatedX * Math.sin(radians) + translatedY * Math.cos(radians),
+  };
+}
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

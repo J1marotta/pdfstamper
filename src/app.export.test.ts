@@ -42,9 +42,13 @@ describe('PdfStampStudio export flow', () => {
           sourceBytes: Uint8Array;
           fields: unknown[];
           pageCount: number;
+          pageSizes: Array<{ width: number; height: number }>;
           previewDocument: { destroy: () => Promise<void> };
         } | null;
-        busy: boolean;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        loadingPdf: boolean;
+        exporting: boolean;
       };
       handleExport: () => Promise<void>;
     };
@@ -54,11 +58,24 @@ describe('PdfStampStudio export flow', () => {
       sourceBytes: new Uint8Array([1, 2, 3]),
       fields: [],
       pageCount: 1,
+      pageSizes: [{ width: 595, height: 842 }],
       previewDocument: {
         destroy: async () => undefined,
       },
     };
-    internalStudio.state.busy = false;
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.loadingPdf = false;
+    internalStudio.state.exporting = false;
 
     await internalStudio.handleExport();
 
@@ -66,7 +83,7 @@ describe('PdfStampStudio export flow', () => {
     expect(downloadBlob).toHaveBeenCalledTimes(1);
     expect(downloadBlob.mock.calls[0]?.[1]).toBe('resume-stamped.pdf');
 
-    const primaryLink = document.querySelector('.export-button-link') as HTMLAnchorElement | null;
+    const primaryLink = document.querySelector('.action-button[href]') as HTMLAnchorElement | null;
     expect(primaryLink).not.toBeNull();
     expect(primaryLink?.href).toContain('blob:latest-export');
     expect(primaryLink?.download).toBe('resume-stamped.pdf');

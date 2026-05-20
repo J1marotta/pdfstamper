@@ -108,12 +108,12 @@ export function shouldShowStampImage(stamp: StampSettings, hasImage: boolean): b
   return hasImage && (stamp.mode === 'image' || stamp.mode === 'both');
 }
 
-export function shouldShowStampOnPage(
-  stamp: StampSettings,
-  pageNumber: number,
-  pageCount: number,
-): boolean {
-  return stamp.placement === 'every-page' || pageNumber === pageCount;
+export function isStampPlaced(stamp: StampSettings): boolean {
+  return Boolean(stamp.placement.pageId);
+}
+
+export function shouldShowStampOnPage(stamp: StampSettings, pageId: string): boolean {
+  return stamp.placement.pageId === pageId;
 }
 
 export function syncStampFromProfile(

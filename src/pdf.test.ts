@@ -1,7 +1,7 @@
 import { PDFDocument } from 'pdf-lib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StampSettings } from './types';
+import type { DocumentPageModel, StampSettings } from './types';
 
 class MockDOMMatrix {
   a = 1;
@@ -30,8 +30,13 @@ function makeStamp(overrides: Partial<StampSettings> = {}): StampSettings {
     approvedBy1: 'Approver One',
     approvedBy2: 'Approver Two',
     date: '2026-05-20',
-    placement: 'last-page',
-    alignment: 'right',
+    placement: {
+      pageId: 'pdf-1',
+      x: 0.5,
+      y: 0.72,
+      width: 0.5,
+      rotation: 0,
+    },
     flatten: false,
     imageBytes: null,
     imageMime: null,
@@ -46,13 +51,65 @@ describe('exportFilledPdf', () => {
     const source = await PDFDocument.create();
     source.addPage([595, 842]);
     const sourceBytes = new Uint8Array(await source.save());
+    const pages: DocumentPageModel[] = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
 
-    const blob = await exportFilledPdf(sourceBytes, [], makeStamp());
+    const blob = await exportFilledPdf(sourceBytes, [], makeStamp(), pages);
     const header = await blob.slice(0, 8).text();
 
     expect(blob.type).toBe('application/pdf');
     expect(blob.size).toBeGreaterThan(0);
     expect(header).toContain('%PDF-');
+  });
+
+  it('inserts blank pages into the exported document order', async () => {
+    const { exportFilledPdf } = await import('./pdf');
+    const source = await PDFDocument.create();
+    source.addPage([595, 842]);
+    const sourceBytes = new Uint8Array(await source.save());
+    const pages: DocumentPageModel[] = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+      {
+        id: 'blank-1',
+        kind: 'blank',
+        width: 595,
+        height: 842,
+        label: 'Blank 1',
+      },
+    ];
+
+    const blob = await exportFilledPdf(
+      sourceBytes,
+      [],
+      makeStamp({
+        placement: {
+          pageId: 'blank-1',
+          x: 0.5,
+          y: 0.5,
+          width: 0.44,
+          rotation: 12,
+        },
+      }),
+      pages,
+    );
+    const exported = await PDFDocument.load(await blob.arrayBuffer());
+
+    expect(exported.getPageCount()).toBe(2);
   });
 });
 

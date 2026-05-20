@@ -60,6 +60,38 @@ export interface FillStats {
 
 export type ProfileValues = Partial<Record<SemanticKey, string>>;
 
+export interface PageSize {
+  width: number;
+  height: number;
+}
+
+export interface StampPlacement {
+  pageId: string | null;
+  x: number;
+  y: number;
+  width: number;
+  rotation: number;
+}
+
+export interface PdfPageModel {
+  id: string;
+  kind: 'pdf';
+  pageNumber: number;
+  width: number;
+  height: number;
+  label: string;
+}
+
+export interface BlankPageModel {
+  id: string;
+  kind: 'blank';
+  width: number;
+  height: number;
+  label: string;
+}
+
+export type DocumentPageModel = PdfPageModel | BlankPageModel;
+
 export interface StampSettings {
   mode: 'text' | 'image' | 'both';
   payee: string;
@@ -71,8 +103,7 @@ export interface StampSettings {
   approvedBy1: string;
   approvedBy2: string;
   date: string;
-  placement: 'last-page' | 'every-page';
-  alignment: 'left' | 'center' | 'right';
+  placement: StampPlacement;
   flatten: boolean;
   imageBytes: Uint8Array | null;
   imageMime: string | null;

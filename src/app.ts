@@ -9,16 +9,20 @@ import {
 import type { LoadedPdfBundle } from './pdf';
 import {
   buildStampRows,
+  isStampPlaced,
   shouldShowStampImage,
   shouldShowStampOnPage,
   shouldShowStampTable,
   syncStampFromProfile,
 } from './stamp';
 import type {
+  DocumentPageModel,
   FillStats,
+  PageSize,
   PdfFieldModel,
   ProfileValues,
   SemanticKey,
+  StampPlacement,
   StampSettings,
 } from './types';
 
@@ -29,45 +33,52 @@ interface NoticeState {
 
 interface AppState {
   bundle: LoadedPdfBundle | null;
+  pages: DocumentPageModel[];
   fields: PdfFieldModel[];
   profile: ProfileValues;
   activeKeys: SemanticKey[];
   stats: FillStats;
   stamp: StampSettings;
+  stampSelected: boolean;
   overwriteExisting: boolean;
-  previewPage: number;
+  previewPageId: string | null;
   notice: NoticeState;
-  busy: boolean;
+  loadingPdf: boolean;
+  exporting: boolean;
   stampImageUrl: string | null;
   lastExportUrl: string | null;
   lastExportName: string | null;
+  advancedOpen: boolean;
+  blankInsertMode: 'after-current' | 'at-end';
 }
 
 interface AppElements {
   fileInput: HTMLInputElement;
-  dropzone: HTMLButtonElement;
+  uploadButton: HTMLButtonElement;
+  addBlankPageButton: HTMLButtonElement;
+  exportActions: HTMLElement;
   status: HTMLElement;
-  summary: HTMLElement;
-  profileFields: HTMLElement;
-  overwriteToggle: HTMLInputElement;
   stampControls: HTMLElement;
+  profileFields: HTMLElement;
   fieldList: HTMLElement;
-  exportPanel: HTMLElement;
+  overwriteToggle: HTMLInputElement;
   previewFrame: HTMLElement;
-  previewStamp: HTMLElement;
   previewCanvas: HTMLCanvasElement;
+  previewEmpty: HTMLElement;
   previewHint: HTMLElement;
+  previewStamp: HTMLElement;
+  previewGuides: HTMLElement;
   previewPageLabel: HTMLElement;
   previewFileMeta: HTMLElement;
   prevPageButton: HTMLButtonElement;
   nextPageButton: HTMLButtonElement;
+  thumbnailRail: HTMLElement;
+  advancedSheet: HTMLElement;
 }
 
 interface ReapplyRenderOptions {
-  summary?: boolean;
   profileFields?: boolean;
   fieldList?: boolean;
-  exportPanel?: boolean;
 }
 
 interface ContainerRenderState {
@@ -78,12 +89,29 @@ interface ContainerRenderState {
   scrollLeft: number;
 }
 
+type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+
+interface StampInteraction {
+  kind: 'drag' | 'resize' | 'rotate';
+  handle?: ResizeHandle;
+  startClientX: number;
+  startClientY: number;
+  stageRect: DOMRect;
+  startPlacement: StampPlacement;
+  startWidthPx: number;
+  startHeightPx: number;
+}
+
 const EMPTY_STATS: FillStats = {
   autofilledCount: 0,
   remainingCount: 0,
   editableCount: 0,
   matchedCount: 0,
 };
+
+const STAMP_MIN_WIDTH_RATIO = 0.2;
+const STAMP_MAX_WIDTH_RATIO = 0.88;
+const STAMP_SNAP_THRESHOLD = 0.02;
 
 type PdfModule = typeof import('./pdf');
 
@@ -100,32 +128,40 @@ export class PdfStampStudio {
   private state: AppState;
   private previewToken = 0;
   private previewResizeFrame: number | null = null;
+  private blankPageSerial = 0;
+  private stampInteraction: StampInteraction | null = null;
+  private suppressNextPreviewClick = false;
 
   constructor(root: HTMLElement) {
     this.root = root;
     this.root.innerHTML = shellMarkup();
     this.elements = {
       fileInput: this.root.querySelector<HTMLInputElement>('#file-input')!,
-      dropzone: this.root.querySelector<HTMLButtonElement>('#dropzone')!,
+      uploadButton: this.root.querySelector<HTMLButtonElement>('#upload-button')!,
+      addBlankPageButton: this.root.querySelector<HTMLButtonElement>('#add-blank-page-button')!,
+      exportActions: this.root.querySelector<HTMLElement>('#export-actions')!,
       status: this.root.querySelector<HTMLElement>('#status')!,
-      summary: this.root.querySelector<HTMLElement>('#summary')!,
-      profileFields: this.root.querySelector<HTMLElement>('#profile-fields')!,
-      overwriteToggle: this.root.querySelector<HTMLInputElement>('#overwrite-toggle')!,
       stampControls: this.root.querySelector<HTMLElement>('#stamp-controls')!,
+      profileFields: this.root.querySelector<HTMLElement>('#profile-fields')!,
       fieldList: this.root.querySelector<HTMLElement>('#field-list')!,
-      exportPanel: this.root.querySelector<HTMLElement>('#export-panel')!,
+      overwriteToggle: this.root.querySelector<HTMLInputElement>('#overwrite-toggle')!,
       previewFrame: this.root.querySelector<HTMLElement>('#preview-frame')!,
-      previewStamp: this.root.querySelector<HTMLElement>('#preview-stamp')!,
       previewCanvas: this.root.querySelector<HTMLCanvasElement>('#preview-canvas')!,
+      previewEmpty: this.root.querySelector<HTMLElement>('#preview-empty')!,
       previewHint: this.root.querySelector<HTMLElement>('#preview-hint')!,
+      previewStamp: this.root.querySelector<HTMLElement>('#preview-stamp')!,
+      previewGuides: this.root.querySelector<HTMLElement>('#preview-guides')!,
       previewPageLabel: this.root.querySelector<HTMLElement>('#preview-page-label')!,
       previewFileMeta: this.root.querySelector<HTMLElement>('#preview-file-meta')!,
       prevPageButton: this.root.querySelector<HTMLButtonElement>('#prev-page-button')!,
       nextPageButton: this.root.querySelector<HTMLButtonElement>('#next-page-button')!,
+      thumbnailRail: this.root.querySelector<HTMLElement>('#thumbnail-rail')!,
+      advancedSheet: this.root.querySelector<HTMLElement>('#advanced-sheet')!,
     };
 
     this.state = {
       bundle: null,
+      pages: [],
       fields: [],
       profile: {
         date: todayInputValue(),
@@ -133,16 +169,20 @@ export class PdfStampStudio {
       activeKeys: ['fullName', 'email', 'phone', 'reference', 'date'],
       stats: EMPTY_STATS,
       stamp: defaultStampSettings(),
+      stampSelected: false,
       overwriteExisting: false,
-      previewPage: 1,
+      previewPageId: null,
       notice: {
         tone: 'neutral',
-        message: 'Drop a PDF to inspect its fillable fields and keep everything in-browser.',
+        message: 'Upload a PDF, click once to place the stamp, then drag, resize, or rotate it.',
       },
-      busy: false,
+      loadingPdf: false,
+      exporting: false,
       stampImageUrl: null,
       lastExportUrl: null,
       lastExportName: null,
+      advancedOpen: false,
+      blankInsertMode: 'after-current',
     };
 
     this.bindEvents();
@@ -150,9 +190,51 @@ export class PdfStampStudio {
   }
 
   private bindEvents(): void {
-    this.elements.dropzone.addEventListener('click', () => {
-      if (!this.state.busy) {
-        this.elements.fileInput.click();
+    this.root.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
+      if (!action) {
+        return;
+      }
+
+      if (action === 'choose-file') {
+        if (!this.state.loadingPdf) {
+          this.elements.fileInput.click();
+        }
+        return;
+      }
+
+      if (action === 'add-blank-page') {
+        this.addBlankPage();
+        return;
+      }
+
+      if (action === 'export-pdf') {
+        void this.handleExport();
+        return;
+      }
+
+      if (action === 'open-advanced') {
+        this.state.advancedOpen = true;
+        this.renderAdvancedSheetVisibility();
+        return;
+      }
+
+      if (action === 'close-advanced') {
+        this.state.advancedOpen = false;
+        this.renderAdvancedSheetVisibility();
+        return;
+      }
+
+      if (action === 'clear-stamp-image') {
+        this.invalidateLastExport();
+        this.clearStampImage();
+        this.renderStampControls();
+        this.renderPreviewStamp();
       }
     });
 
@@ -165,44 +247,211 @@ export class PdfStampStudio {
       target.value = '';
     });
 
-    this.elements.dropzone.addEventListener('dragover', (event) => {
+    this.elements.previewFrame.addEventListener('dragover', (event) => {
       event.preventDefault();
-      if (this.state.busy) {
-        if (event.dataTransfer) {
-          event.dataTransfer.dropEffect = 'none';
-        }
-        this.elements.dropzone.classList.remove('is-dragging');
-        return;
-      }
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = 'copy';
+        event.dataTransfer.dropEffect = this.state.loadingPdf ? 'none' : 'copy';
       }
-      this.elements.dropzone.classList.add('is-dragging');
+      if (!this.state.loadingPdf) {
+        this.elements.previewFrame.classList.add('is-dragging');
+      }
     });
 
-    this.elements.dropzone.addEventListener('dragleave', () => {
-      this.elements.dropzone.classList.remove('is-dragging');
+    this.elements.previewFrame.addEventListener('dragleave', () => {
+      this.elements.previewFrame.classList.remove('is-dragging');
     });
 
-    this.elements.dropzone.addEventListener('drop', (event) => {
+    this.elements.previewFrame.addEventListener('drop', (event) => {
       event.preventDefault();
-      this.elements.dropzone.classList.remove('is-dragging');
-      if (this.state.busy) {
+      this.elements.previewFrame.classList.remove('is-dragging');
+      if (this.state.loadingPdf) {
         return;
       }
+
       const file = Array.from(event.dataTransfer?.files ?? []).find((candidate) =>
         candidate.name.toLowerCase().endsWith('.pdf'),
       );
-
       if (file) {
         void this.handlePdf(file);
       }
     });
 
-    this.elements.overwriteToggle.addEventListener('change', () => {
-      if (this.state.busy) {
+    this.elements.previewFrame.addEventListener('click', (event) => {
+      if (this.suppressNextPreviewClick) {
+        this.suppressNextPreviewClick = false;
         return;
       }
+
+      if (!this.state.bundle || this.state.loadingPdf) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (target.closest('#preview-stamp')) {
+        return;
+      }
+
+      const currentPage = this.getCurrentPage();
+      const stageRect = this.getPreviewStageRect();
+      if (!currentPage || !stageRect) {
+        return;
+      }
+
+      const placement = placementFromPointer(
+        currentPage.id,
+        event.clientX,
+        event.clientY,
+        stageRect,
+        this.state.stamp.placement.width,
+      );
+      this.state.stamp = {
+        ...this.state.stamp,
+        placement,
+      };
+      this.state.stampSelected = true;
+      this.invalidateLastExport();
+      this.renderStampControls();
+      this.renderPreviewStamp();
+    });
+
+    this.elements.previewStamp.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!target.closest('.preview-stamp-object')) {
+        return;
+      }
+
+      if (!this.state.stampSelected) {
+        this.state.stampSelected = true;
+        this.renderStampControls();
+        this.renderPreviewStamp();
+      }
+    });
+
+    this.elements.previewStamp.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) {
+        return;
+      }
+
+      const key = target.dataset.stampKey as keyof StampSettings | undefined;
+      if (!key || !isStampValueKey(key)) {
+        return;
+      }
+
+      this.state.stamp = {
+        ...this.state.stamp,
+        [key]: target.value,
+      };
+      this.invalidateLastExport();
+    });
+
+    this.elements.previewStamp.addEventListener('pointerdown', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!this.state.bundle || !isStampPlaced(this.state.stamp)) {
+        return;
+      }
+
+      const stageRect = this.getPreviewStageRect();
+      const stampBody = this.elements.previewStamp.querySelector<HTMLElement>('.preview-stamp-body');
+      if (!stageRect || !stampBody) {
+        return;
+      }
+
+      if (target.closest('input, button, select, label')) {
+        return;
+      }
+
+      const handle = target.closest<HTMLElement>('[data-stamp-handle]')?.dataset.stampHandle as ResizeHandle | undefined;
+      const rotateHandle = target.closest<HTMLElement>('[data-stamp-action="rotate-stamp"]');
+      const stampCard = target.closest<HTMLElement>('.preview-stamp-object');
+
+      if (!rotateHandle && !handle && !stampCard) {
+        return;
+      }
+
+      if (!this.state.stampSelected) {
+        this.state.stampSelected = true;
+        this.renderStampControls();
+        this.renderPreviewStamp();
+        return;
+      }
+
+      event.preventDefault();
+      const kind: StampInteraction['kind'] =
+        rotateHandle ? 'rotate' : handle ? 'resize' : 'drag';
+      this.stampInteraction = {
+        kind,
+        handle,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        stageRect,
+        startPlacement: { ...this.state.stamp.placement },
+        startWidthPx: stampBody.offsetWidth,
+        startHeightPx: stampBody.offsetHeight,
+      };
+
+      window.addEventListener('pointermove', this.onPointerMove);
+      window.addEventListener('pointerup', this.onPointerUp);
+    });
+
+    this.elements.stampControls.addEventListener('input', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+      }
+
+      if (target instanceof HTMLInputElement && target.type === 'file') {
+        return;
+      }
+
+      const stampSetting = target.dataset.stampSetting as keyof StampSettings | undefined;
+      if (stampSetting) {
+        const nextValue =
+          target instanceof HTMLInputElement && target.type === 'checkbox'
+            ? target.checked
+            : target.value;
+        this.state.stamp = {
+          ...this.state.stamp,
+          [stampSetting]: nextValue,
+        };
+        this.invalidateLastExport();
+        this.renderStampControls();
+        this.renderPreviewStamp();
+        return;
+      }
+
+      const uiSetting = target.dataset.uiSetting;
+      if (uiSetting === 'blank-insert-mode') {
+        this.state.blankInsertMode = target.value === 'at-end' ? 'at-end' : 'after-current';
+        this.renderStampControls();
+      }
+    });
+
+    this.elements.stampControls.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== 'file') {
+        return;
+      }
+
+      const file = target.files?.[0];
+      if (file) {
+        void this.handleStampImage(file);
+      }
+    });
+
+    this.elements.overwriteToggle.addEventListener('change', () => {
       this.invalidateLastExport();
       this.state.overwriteExisting = this.elements.overwriteToggle.checked;
       this.reapplyProfile();
@@ -211,10 +460,6 @@ export class PdfStampStudio {
     this.elements.profileFields.addEventListener('input', (event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement)) {
-        return;
-      }
-
-      if (this.state.busy) {
         return;
       }
 
@@ -232,18 +477,13 @@ export class PdfStampStudio {
       this.invalidateLastExport();
       this.state.profile = nextProfile;
       this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
-
       this.reapplyProfile({ profileFields: false });
-      this.renderStampControls();
+      this.renderPreviewStamp();
     });
 
     const onFieldEdit = (event: Event) => {
       const target = event.target;
       if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
-        return;
-      }
-
-      if (this.state.busy) {
         return;
       }
 
@@ -280,125 +520,181 @@ export class PdfStampStudio {
           ...previousProfile,
           [field.semanticKey]: nextValue,
         };
-
         this.state.profile = nextProfile;
         this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
       }
 
       this.reapplyProfile();
-      this.renderStampControls();
+      this.renderPreviewStamp();
     };
 
     this.elements.fieldList.addEventListener('input', onFieldEdit);
     this.elements.fieldList.addEventListener('change', onFieldEdit);
 
-    this.elements.stampControls.addEventListener('input', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
-        return;
-      }
-
-      if (this.state.busy) {
-        return;
-      }
-
-      if (target instanceof HTMLInputElement && target.type === 'file') {
-        return;
-      }
-
-      const key = target.dataset.stampKey as keyof StampSettings | undefined;
-      if (!key) {
-        return;
-      }
-
-      const nextValue =
-        target instanceof HTMLInputElement && target.type === 'checkbox'
-          ? target.checked
-          : target.value;
-
-      this.state.stamp = {
-        ...this.state.stamp,
-        [key]: nextValue,
-      };
-      this.invalidateLastExport();
-      this.renderStampControls();
-    });
-
-    this.elements.stampControls.addEventListener('change', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLInputElement) || target.type !== 'file') {
-        return;
-      }
-
-      if (this.state.busy) {
-        return;
-      }
-
-      const file = target.files?.[0];
-      if (file) {
-        void this.handleStampImage(file);
-      }
-    });
-
-    this.elements.stampControls.addEventListener('click', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-
-      if (this.state.busy) {
-        return;
-      }
-
-      const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
-      if (action === 'clear-stamp-image') {
-        this.invalidateLastExport();
-        this.clearStampImage();
-        this.renderStampControls();
-      }
-    });
-
-    this.elements.exportPanel.addEventListener('click', (event) => {
-      const target = event.target;
-      if (!(target instanceof HTMLElement)) {
-        return;
-      }
-
-      if (this.state.busy) {
-        return;
-      }
-
-      const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
-      if (action === 'export-pdf') {
-        void this.handleExport();
-      }
-    });
-
     this.elements.prevPageButton.addEventListener('click', () => {
-      if (!this.state.bundle || this.state.busy || this.state.previewPage <= 1) {
+      const currentIndex = this.getCurrentPageIndex();
+      if (currentIndex <= 0) {
         return;
       }
 
-      this.state.previewPage -= 1;
+      this.state.previewPageId = this.state.pages[currentIndex - 1]?.id ?? null;
+      this.state.stampSelected = false;
+      this.renderStampControls();
+      this.renderThumbnailRail();
       this.renderPreviewMeta();
       void this.renderPreview();
     });
 
     this.elements.nextPageButton.addEventListener('click', () => {
-      if (!this.state.bundle || this.state.busy || this.state.previewPage >= this.state.bundle.pageCount) {
+      const currentIndex = this.getCurrentPageIndex();
+      if (currentIndex === -1 || currentIndex >= this.state.pages.length - 1) {
         return;
       }
 
-      this.state.previewPage += 1;
+      this.state.previewPageId = this.state.pages[currentIndex + 1]?.id ?? null;
+      this.state.stampSelected = false;
+      this.renderStampControls();
+      this.renderThumbnailRail();
+      this.renderPreviewMeta();
+      void this.renderPreview();
+    });
+
+    this.elements.thumbnailRail.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const pageId = target.closest<HTMLElement>('[data-page-id]')?.dataset.pageId;
+      if (!pageId) {
+        return;
+      }
+
+      this.state.previewPageId = pageId;
+      this.state.stampSelected = false;
+      this.renderStampControls();
+      this.renderThumbnailRail();
       this.renderPreviewMeta();
       void this.renderPreview();
     });
 
     window.addEventListener('resize', () => {
-      if (this.state.bundle && !this.state.busy) {
+      if (this.state.bundle) {
         this.schedulePreviewRender();
       }
     });
+  }
+
+  private readonly onPointerMove = (event: PointerEvent): void => {
+    const interaction = this.stampInteraction;
+    if (!interaction || !isStampPlaced(this.state.stamp)) {
+      return;
+    }
+
+    const { stageRect } = interaction;
+    const startCenterX = interaction.startPlacement.x * stageRect.width;
+    const startCenterY = interaction.startPlacement.y * stageRect.height;
+
+    if (interaction.kind === 'drag') {
+      const halfWidth = interaction.startWidthPx / 2;
+      const halfHeight = interaction.startHeightPx / 2;
+      const nextCenterX = startCenterX + (event.clientX - interaction.startClientX);
+      const nextCenterY = startCenterY + (event.clientY - interaction.startClientY);
+      this.updatePlacementFromPixels(nextCenterX, nextCenterY, interaction.startPlacement.width, halfWidth, halfHeight);
+      this.renderPreviewStamp();
+      return;
+    }
+
+    if (interaction.kind === 'rotate') {
+      const centerClientX = stageRect.left + startCenterX;
+      const centerClientY = stageRect.top + startCenterY;
+      const startAngle = Math.atan2(
+        interaction.startClientY - centerClientY,
+        interaction.startClientX - centerClientX,
+      );
+      const currentAngle = Math.atan2(event.clientY - centerClientY, event.clientX - centerClientX);
+      const nextRotation = normalizeDegrees(
+        interaction.startPlacement.rotation + ((currentAngle - startAngle) * 180) / Math.PI,
+      );
+      this.state.stamp = {
+        ...this.state.stamp,
+        placement: {
+          ...this.state.stamp.placement,
+          rotation: nextRotation,
+        },
+      };
+      this.invalidateLastExport();
+      this.renderPreviewStamp();
+      return;
+    }
+
+    const ratio = scaleRatioFromHandle(interaction.handle!, {
+      centerX: stageRect.left + startCenterX,
+      centerY: stageRect.top + startCenterY,
+      startX: interaction.startClientX,
+      startY: interaction.startClientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+      startWidth: interaction.startWidthPx,
+      startHeight: interaction.startHeightPx,
+    });
+    const nextWidthRatio = clampValue(
+      interaction.startPlacement.width * ratio,
+      STAMP_MIN_WIDTH_RATIO,
+      STAMP_MAX_WIDTH_RATIO,
+    );
+    const nextWidthPx = nextWidthRatio * stageRect.width;
+    const nextHeightPx = interaction.startHeightPx * (nextWidthPx / interaction.startWidthPx);
+    this.updatePlacementFromPixels(startCenterX, startCenterY, nextWidthRatio, nextWidthPx / 2, nextHeightPx / 2);
+    this.renderPreviewStamp();
+  };
+
+  private readonly onPointerUp = (): void => {
+    if (this.stampInteraction) {
+      this.suppressNextPreviewClick = true;
+    }
+
+    this.stampInteraction = null;
+    window.removeEventListener('pointermove', this.onPointerMove);
+    window.removeEventListener('pointerup', this.onPointerUp);
+  };
+
+  private updatePlacementFromPixels(
+    centerXPx: number,
+    centerYPx: number,
+    widthRatio: number,
+    halfWidthPx: number,
+    halfHeightPx: number,
+  ): void {
+    const stageRect = this.getPreviewStageRect();
+    if (!stageRect || !this.state.previewPageId) {
+      return;
+    }
+
+    let nextX = centerXPx / stageRect.width;
+    let nextY = centerYPx / stageRect.height;
+    nextX = clampValue(nextX, halfWidthPx / stageRect.width, 1 - halfWidthPx / stageRect.width);
+    nextY = clampValue(nextY, halfHeightPx / stageRect.height, 1 - halfHeightPx / stageRect.height);
+
+    if (Math.abs(nextX - 0.5) < STAMP_SNAP_THRESHOLD) {
+      nextX = 0.5;
+    }
+
+    if (Math.abs(nextY - 0.5) < STAMP_SNAP_THRESHOLD) {
+      nextY = 0.5;
+    }
+
+    this.state.stamp = {
+      ...this.state.stamp,
+      placement: {
+        ...this.state.stamp.placement,
+        pageId: this.state.previewPageId,
+        x: nextX,
+        y: nextY,
+        width: widthRatio,
+      },
+    };
+    this.invalidateLastExport();
   }
 
   private async handlePdf(file: File): Promise<void> {
@@ -409,13 +705,12 @@ export class PdfStampStudio {
     }
 
     this.clearLastExport();
-    this.state.busy = true;
-    this.setNotice('Loading the PDF locally and scanning its fillable fields...', 'busy');
+    this.state.loadingPdf = true;
+    this.setNotice('Loading the PDF locally and building the page surface…', 'busy');
     this.renderStatus();
     this.renderControlState();
     this.renderExportPanel();
-    this.renderPreviewMeta();
-    this.showPreviewHint('Loading PDF preview...');
+    this.showPreviewHint('Loading PDF preview…');
 
     try {
       await this.releasePreviewDocument();
@@ -436,49 +731,46 @@ export class PdfStampStudio {
 
       const previousProfile = this.state.profile;
       this.state.bundle = bundle;
+      this.state.pages = buildDocumentPages(bundle.pageSizes);
       this.state.fields = bundle.fields;
       this.state.profile = seededProfile;
       this.state.activeKeys = activeKeys;
-      this.state.previewPage = 1;
+      this.state.previewPageId = this.state.pages[0]?.id ?? null;
       this.state.stamp = syncStampFromProfile(previousProfile, seededProfile, {
         ...this.state.stamp,
+        placement: {
+          ...defaultStampSettings().placement,
+        },
         date: seededProfile.date || this.state.stamp.date || todayInputValue(),
       });
+      this.state.stampSelected = false;
 
       this.reapplyProfile();
-      this.renderStatus();
+      this.renderThumbnailRail();
       this.renderStampControls();
       this.renderPreviewMeta();
       await this.renderPreview();
 
-      if (bundle.fields.length === 0) {
-        this.setNotice(
-          'No AcroForm fields were detected. Stamping still works, but non-fillable PDFs will need OCR and coordinate mapping later.',
-          'neutral',
-        );
-      } else {
-        this.setNotice(
-          `Ready. Detected ${bundle.fields.length} fillable fields across ${bundle.pageCount} page${bundle.pageCount === 1 ? '' : 's'}.`,
-          'success',
-        );
-      }
+      this.setNotice(
+        `Ready. ${bundle.pageCount} page${bundle.pageCount === 1 ? '' : 's'} loaded. Click on the page to place your stamp.`,
+        'success',
+      );
     } catch (error) {
       console.error(error);
       this.state.bundle = null;
+      this.state.pages = [];
       this.state.fields = [];
       this.state.stats = EMPTY_STATS;
+      this.state.previewPageId = null;
+      this.state.stampSelected = false;
       this.setNotice(
         'The PDF could not be parsed. Password-protected or malformed files need a separate handling path.',
         'error',
       );
-      this.elements.previewFrame.classList.remove('is-loading', 'has-preview');
-      this.renderSummary();
-      this.renderProfileFields();
-      this.renderFieldList();
-      this.renderExportPanel();
+      this.renderThumbnailRail();
       this.renderPreviewMeta();
     } finally {
-      this.state.busy = false;
+      this.state.loadingPdf = false;
       this.renderControlState();
       this.renderStatus();
       this.renderExportPanel();
@@ -504,10 +796,11 @@ export class PdfStampStudio {
     };
     this.state.stampImageUrl = URL.createObjectURL(file);
     this.renderStampControls();
+    this.renderPreviewStamp();
   }
 
   private async handleExport(): Promise<void> {
-    if (!this.state.bundle || this.state.busy) {
+    if (!this.state.bundle || this.state.loadingPdf || this.state.exporting) {
       return;
     }
 
@@ -518,36 +811,69 @@ export class PdfStampStudio {
       options: [...field.options],
     }));
     const stamp = cloneStampSettings(this.state.stamp);
+    const pages = this.state.pages.map((page) => ({ ...page }));
+
     try {
       const { exportFilledPdf, downloadBlob } = await getPdfModule();
-      this.state.busy = true;
-      this.setNotice('Generating the stamped PDF locally...', 'busy');
+      this.state.exporting = true;
+      this.setNotice('Generating the stamped PDF locally…', 'busy');
       this.renderStatus();
       this.renderControlState();
       this.renderExportPanel();
-      this.renderPreviewMeta();
 
-      const blob = await exportFilledPdf(
-        sourceBytes,
-        fields,
-        stamp,
-      );
+      const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages);
       this.setLastExport(blob, outputName);
       downloadBlob(blob, outputName);
       this.setNotice(
-        'Stamped PDF is ready. If the automatic download was blocked, use the download action below.',
+        'Stamped PDF is ready. If the browser blocked the save prompt, use the download action in the top bar.',
         'success',
       );
     } catch (error) {
       console.error(error);
       this.setNotice('Export failed. Some PDFs have unusual field structures that need a custom fallback.', 'error');
     } finally {
-      this.state.busy = false;
+      this.state.exporting = false;
       this.renderControlState();
       this.renderStatus();
       this.renderExportPanel();
-      this.renderPreviewMeta();
     }
+  }
+
+  private addBlankPage(): void {
+    if (!this.state.bundle) {
+      return;
+    }
+
+    const currentIndex = this.getCurrentPageIndex();
+    const referencePage = this.getCurrentPage() ?? this.state.pages.at(-1) ?? null;
+    const referenceSize: PageSize = referencePage
+      ? { width: referencePage.width, height: referencePage.height }
+      : this.state.bundle.pageSizes[0] ?? { width: 595, height: 842 };
+    const blankPage: DocumentPageModel = {
+      id: `blank-${Date.now()}-${this.blankPageSerial += 1}`,
+      kind: 'blank',
+      width: referenceSize.width,
+      height: referenceSize.height,
+      label: `Blank ${this.blankPageSerial}`,
+    };
+
+    const nextPages = [...this.state.pages];
+    if (this.state.blankInsertMode === 'after-current' && currentIndex >= 0) {
+      nextPages.splice(currentIndex + 1, 0, blankPage);
+    } else {
+      nextPages.push(blankPage);
+    }
+
+    this.state.pages = nextPages;
+    this.state.previewPageId = blankPage.id;
+    this.state.stampSelected = false;
+    this.invalidateLastExport();
+    this.renderThumbnailRail();
+    this.renderStampControls();
+    this.renderPreviewMeta();
+    void this.renderPreview();
+    this.setNotice('Blank page added. Click anywhere on it if you want to move the stamp there.', 'neutral');
+    this.renderStatus();
   }
 
   private reapplyProfile(options: ReapplyRenderOptions = {}): void {
@@ -556,10 +882,8 @@ export class PdfStampStudio {
     }
 
     const {
-      summary = true,
       profileFields = true,
       fieldList = true,
-      exportPanel = true,
     } = options;
 
     const result = applyProfileToFields(
@@ -570,29 +894,33 @@ export class PdfStampStudio {
 
     this.state.fields = result.fields;
     this.state.stats = result.stats;
-    if (summary) {
-      this.renderSummary();
-    }
     if (profileFields) {
       this.renderProfileFields();
     }
     if (fieldList) {
       this.renderFieldList();
     }
-    if (exportPanel) {
-      this.renderExportPanel();
-    }
   }
 
   private renderAll(): void {
     this.renderControlState();
     this.renderStatus();
-    this.renderSummary();
+    this.renderThumbnailRail();
     this.renderProfileFields();
-    this.renderStampControls();
     this.renderFieldList();
+    this.renderStampControls();
     this.renderExportPanel();
     this.renderPreviewMeta();
+    this.renderAdvancedSheetVisibility();
+  }
+
+  private renderControlState(): void {
+    this.elements.uploadButton.disabled = this.state.loadingPdf;
+    this.elements.addBlankPageButton.disabled = !this.state.bundle || this.state.loadingPdf;
+    const currentIndex = this.getCurrentPageIndex();
+    this.elements.prevPageButton.disabled = currentIndex <= 0;
+    this.elements.nextPageButton.disabled = currentIndex === -1 || currentIndex >= this.state.pages.length - 1;
+    this.elements.overwriteToggle.disabled = !this.state.bundle;
   }
 
   private renderStatus(): void {
@@ -600,60 +928,44 @@ export class PdfStampStudio {
     this.elements.status.textContent = this.state.notice.message;
   }
 
-  private renderSummary(): void {
-    const { bundle, stats } = this.state;
-
-    if (!bundle) {
-      this.updateContainerMarkup(this.elements.summary, `
-        <article class="metric-card">
-          <span class="metric-label">Privacy</span>
-          <strong class="metric-value">No uploads</strong>
-          <p class="metric-copy">Everything stays in browser memory until the tab closes.</p>
-        </article>
-        <article class="metric-card">
-          <span class="metric-label">Best fit</span>
-          <strong class="metric-value">Fillable PDFs</strong>
-          <p class="metric-copy">This first pass targets AcroForm documents for speed and reliability.</p>
-        </article>
-        <article class="metric-card">
-          <span class="metric-label">Export</span>
-          <strong class="metric-value">Download a copy</strong>
-          <p class="metric-copy">You decide when to delete the working file.</p>
-        </article>
+  private renderThumbnailRail(): void {
+    if (this.state.pages.length === 0) {
+      this.updateContainerMarkup(this.elements.thumbnailRail, `
+        <div class="thumbnail-ghost">
+          <div class="thumbnail-paper is-ghost"></div>
+          <p>Pages show up here once a PDF is loaded.</p>
+        </div>
       `);
       return;
     }
 
-    this.updateContainerMarkup(this.elements.summary, `
-      <article class="metric-card">
-        <span class="metric-label">Pages</span>
-        <strong class="metric-value">${bundle.pageCount}</strong>
-        <p class="metric-copy">${escapeHtml(bundle.fileName)}</p>
-      </article>
-      <article class="metric-card">
-        <span class="metric-label">Detected fields</span>
-        <strong class="metric-value">${bundle.fields.length}</strong>
-        <p class="metric-copy">${stats.matchedCount} mapped to shared details</p>
-      </article>
-      <article class="metric-card">
-        <span class="metric-label">Auto-filled</span>
-        <strong class="metric-value">${stats.autofilledCount}</strong>
-        <p class="metric-copy">${stats.remainingCount} still need a manual check</p>
-      </article>
-      <article class="metric-card">
-        <span class="metric-label">Storage</span>
-        <strong class="metric-value">Ephemeral</strong>
-        <p class="metric-copy">No backend, no sync, no persistence unless you download the result.</p>
-      </article>
-    `);
+    const items = this.state.pages
+      .map((page, index) => {
+        const isActive = page.id === this.state.previewPageId;
+        const hasStamp = this.state.stamp.placement.pageId === page.id;
+        return `
+          <button type="button" class="thumb ${isActive ? 'is-active' : ''}" data-page-id="${page.id}">
+            <span class="thumb-paper ${page.kind === 'blank' ? 'is-blank' : ''}">
+              <span class="thumb-lines"></span>
+            </span>
+            <span class="thumb-meta">
+              <strong>${page.kind === 'blank' ? 'Blank' : `Page ${page.pageNumber}`}</strong>
+              <span>${index + 1} / ${this.state.pages.length}</span>
+            </span>
+            ${hasStamp ? '<span class="thumb-stamp-flag">Stamp</span>' : ''}
+          </button>
+        `;
+      })
+      .join('');
+
+    this.updateContainerMarkup(this.elements.thumbnailRail, items);
   }
 
   private renderProfileFields(): void {
     if (!this.state.bundle) {
       this.updateContainerMarkup(this.elements.profileFields, `
-        <div class="empty-block">
-          <p>Shared details appear here after a PDF is loaded.</p>
-          <p class="subtle-copy">The app shows only the details it thinks the form needs, plus a few useful defaults.</p>
+        <div class="sheet-empty-copy">
+          Upload a PDF to review shared details and field mapping.
         </div>
       `);
       return;
@@ -662,7 +974,6 @@ export class PdfStampStudio {
     const inputs = this.state.activeKeys
       .map((key) => {
         const definition = getProfileFieldDefinition(key);
-        const disabledAttr = this.state.busy ? 'disabled' : '';
         const inputType =
           key === 'date'
             ? 'date'
@@ -673,106 +984,28 @@ export class PdfStampStudio {
                 : 'text';
         const value = this.state.profile[key] ?? '';
         return `
-          <label class="stack-field">
-            <span class="field-heading">${escapeHtml(definition.label)}</span>
+          <label class="sheet-field">
+            <span>${escapeHtml(definition.label)}</span>
             <input
               data-profile-key="${key}"
               type="${inputType}"
               value="${escapeAttribute(value)}"
               placeholder="${escapeAttribute(definition.placeholder)}"
-              ${disabledAttr}
             />
-            <span class="field-help">${escapeHtml(definition.helper)}</span>
+            <small>${escapeHtml(definition.helper)}</small>
           </label>
         `;
       })
       .join('');
 
-    this.updateContainerMarkup(this.elements.profileFields, `
-      <div class="section-copy">
-        One edit here can cascade across matching PDF fields. Toggle overwrite if you want these values to replace pre-filled data already in the document.
-      </div>
-      ${inputs}
-    `);
-  }
-
-  private renderStampControls(): void {
-    const stamp = this.state.stamp;
-    const rows = buildStampRows(stamp);
-    const disabledAttr = this.state.busy ? 'disabled' : '';
-    const hasImage = Boolean(this.state.stampImageUrl);
-    const showTable = shouldShowStampTable(stamp, hasImage);
-    const showImage = shouldShowStampImage(stamp, hasImage);
-
-    this.updateContainerMarkup(this.elements.stampControls, `
-      <div class="stamp-editor-shell">
-        <div class="section-copy">
-          Edit the values directly inside the stamp. The same layout is used for the on-page preview and for export.
-        </div>
-        <div class="stamp-toolbar">
-          <label class="stack-field compact-field">
-            <span class="field-heading">Mode</span>
-            <select data-stamp-key="mode" ${disabledAttr}>
-              ${selectOption('text', 'Table stamp', stamp.mode)}
-              ${selectOption('image', 'Image only', stamp.mode)}
-              ${selectOption('both', 'Image + table', stamp.mode)}
-            </select>
-          </label>
-          <label class="stack-field compact-field">
-            <span class="field-heading">Placement</span>
-            <select data-stamp-key="placement" ${disabledAttr}>
-              ${selectOption('last-page', 'Last page', stamp.placement)}
-              ${selectOption('every-page', 'Every page', stamp.placement)}
-            </select>
-          </label>
-          <label class="stack-field compact-field">
-            <span class="field-heading">Alignment</span>
-            <select data-stamp-key="alignment" ${disabledAttr}>
-              ${selectOption('left', 'Left', stamp.alignment)}
-              ${selectOption('center', 'Center', stamp.alignment)}
-              ${selectOption('right', 'Right', stamp.alignment)}
-            </select>
-          </label>
-          <label class="stack-field compact-field">
-            <span class="field-heading">Stamp date</span>
-            <input data-stamp-key="date" type="date" value="${escapeAttribute(stamp.date)}" ${disabledAttr} />
-          </label>
-          <label class="stack-field compact-field stamp-upload-field">
-            <span class="field-heading">Optional image stamp</span>
-            <input type="file" accept="image/png,image/jpeg" ${disabledAttr} />
-          </label>
-          <label class="toggle stamp-toggle">
-            <input data-stamp-key="flatten" type="checkbox" ${stamp.flatten ? 'checked' : ''} ${disabledAttr} />
-            Flatten form fields after export
-          </label>
-        </div>
-        <div class="stamp-editor-card">
-          ${showTable ? renderStampTable(rows, { editable: true, disabled: this.state.busy }) : ''}
-          ${
-            showImage && this.state.stampImageUrl
-              ? `<img class="stamp-preview-image stamp-editor-image" src="${this.state.stampImageUrl}" alt="Stamp image preview" />`
-              : ''
-          }
-        </div>
-        ${
-          stamp.imageName
-            ? `<div class="stamp-image-meta">
-                <span>Loaded image: ${escapeHtml(stamp.imageName)}</span>
-                <button type="button" class="quiet-button" data-action="clear-stamp-image" ${disabledAttr}>Remove image</button>
-              </div>`
-            : ''
-        }
-      </div>
-    `);
-    this.renderPreviewStamp();
+    this.updateContainerMarkup(this.elements.profileFields, inputs);
   }
 
   private renderFieldList(): void {
     if (!this.state.bundle) {
       this.updateContainerMarkup(this.elements.fieldList, `
-        <div class="empty-block">
-          <p>No PDF loaded yet.</p>
-          <p class="subtle-copy">Once the document is parsed, every fillable field appears here for manual cleanup.</p>
+        <div class="sheet-empty-copy">
+          Document fields appear here after parsing.
         </div>
       `);
       return;
@@ -780,9 +1013,8 @@ export class PdfStampStudio {
 
     if (this.state.fields.length === 0) {
       this.updateContainerMarkup(this.elements.fieldList, `
-        <div class="empty-block">
-          <p>No fillable AcroForm fields were found in this PDF.</p>
-          <p class="subtle-copy">Stamping still works. OCR-based field placement can be added later for scanned forms.</p>
+        <div class="sheet-empty-copy">
+          No AcroForm fields were detected in this PDF.
         </div>
       `);
       return;
@@ -811,7 +1043,7 @@ export class PdfStampStudio {
             </div>
           </div>
           <div class="pdf-field-control">
-            ${renderFieldControl(field, this.state.busy)}
+            ${renderFieldControl(field)}
           </div>
         </article>
       `;
@@ -820,108 +1052,212 @@ export class PdfStampStudio {
     this.updateContainerMarkup(this.elements.fieldList, rows);
   }
 
+  private renderStampControls(): void {
+    const bundleLoaded = Boolean(this.state.bundle);
+    const hasImage = Boolean(this.state.stampImageUrl);
+    const currentPage = this.getCurrentPage();
+    const side = this.getInspectorSide();
+    this.elements.stampControls.className = `floating-inspector is-${side}`;
+
+    if (!bundleLoaded) {
+      this.updateContainerMarkup(this.elements.stampControls, `
+        <div class="inspector-copy">
+          <p class="eyebrow">Stamp</p>
+          <h2>Keep the page in the middle.</h2>
+          <p>Upload a PDF and place one approval stamp exactly where it needs to land.</p>
+        </div>
+      `);
+      return;
+    }
+
+    const placementCopy = currentPage
+      ? isStampPlaced(this.state.stamp) && this.state.stamp.placement.pageId === currentPage.id
+        ? 'Drag to move. Pull the edges or corners to resize. Use the top handle to rotate.'
+        : 'Click anywhere on this page to place or move the stamp here.'
+      : 'Choose a page, then click to place the stamp.';
+
+    this.updateContainerMarkup(this.elements.stampControls, `
+      <div class="inspector-copy">
+        <p class="eyebrow">Stamp</p>
+        <h2>${this.state.stampSelected ? 'Direct on-page editing.' : 'One stamp, placed by eye.'}</h2>
+        <p>${escapeHtml(placementCopy)}</p>
+      </div>
+      <div class="inspector-controls">
+        <label class="inspector-field">
+          <span>Mode</span>
+          <select data-stamp-setting="mode">
+            ${selectOption('text', 'Approval block', this.state.stamp.mode)}
+            ${selectOption('image', 'Image only', this.state.stamp.mode)}
+            ${selectOption('both', 'Block + image', this.state.stamp.mode)}
+          </select>
+        </label>
+        <label class="inspector-field">
+          <span>Stamp date</span>
+          <input data-stamp-setting="date" type="date" value="${escapeAttribute(this.state.stamp.date)}" />
+        </label>
+        <label class="inspector-field">
+          <span>Blank page placement</span>
+          <select data-ui-setting="blank-insert-mode">
+            ${selectOption('after-current', 'After current page', this.state.blankInsertMode)}
+            ${selectOption('at-end', 'Append to end', this.state.blankInsertMode)}
+          </select>
+        </label>
+        <label class="inspector-field">
+          <span>Optional image stamp</span>
+          <input type="file" accept="image/png,image/jpeg" />
+        </label>
+        <label class="toggle">
+          <input data-stamp-setting="flatten" type="checkbox" ${this.state.stamp.flatten ? 'checked' : ''} />
+          Flatten filled fields on export
+        </label>
+        <div class="inspector-actions">
+          <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
+          ${
+            hasImage
+              ? '<button type="button" class="ghost-button" data-action="clear-stamp-image">Remove image</button>'
+              : ''
+          }
+        </div>
+      </div>
+    `);
+  }
+
   private renderExportPanel(): void {
-    const disabled = !this.state.bundle || this.state.busy;
     const nextOutputName = this.state.bundle ? outputFileName(this.state.bundle.fileName) : 'your-file-stamped.pdf';
-    const readyToDownload =
+    const disabled = !this.state.bundle || this.state.loadingPdf || this.state.exporting;
+    const primaryAction =
       this.state.lastExportUrl && this.state.lastExportName
         ? `
-          <div class="export-actions">
-            <a class="export-button export-button-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
-              Download stamped PDF
-            </a>
-            <button type="button" class="quiet-button export-secondary-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-              Regenerate with latest edits
-            </button>
-          </div>
+          <a class="action-button is-primary" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
+            Download stamped PDF
+          </a>
+          <button type="button" class="ghost-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
+            Regenerate
+          </button>
         `
         : `
-          <button type="button" class="export-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-            ${this.state.busy ? 'Working...' : 'Generate stamped PDF'}
+          <button type="button" class="action-button is-primary" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
+            ${this.state.exporting ? 'Working…' : 'Export stamped PDF'}
           </button>
         `;
-    const statusLine =
-      this.state.lastExportUrl && this.state.lastExportName
-        ? `
-          <a class="export-retry-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
-            Open the latest stamped PDF again
-          </a>
-        `
-        : '';
-    this.updateContainerMarkup(this.elements.exportPanel, `
-      <div class="export-card">
-        <div>
-          <h3>Export a local copy</h3>
-          <p>The source file stays untouched. You download a fresh PDF with the filled fields and stamp baked in.</p>
-          <p class="subtle-copy">Output: ${escapeHtml(nextOutputName)}</p>
-          ${statusLine}
-        </div>
-        ${readyToDownload}
+
+    this.updateContainerMarkup(this.elements.exportActions, `
+      <div class="export-inline">
+        ${primaryAction}
+        <span class="export-name">${escapeHtml(nextOutputName)}</span>
       </div>
     `);
   }
 
   private renderPreviewMeta(): void {
-    if (!this.state.bundle) {
-      this.elements.previewPageLabel.textContent = 'No preview';
-      this.elements.previewFileMeta.textContent = 'Drop a PDF to render the first page.';
-      this.elements.prevPageButton.disabled = true;
-      this.elements.nextPageButton.disabled = true;
-      this.elements.previewFrame.classList.remove('is-loading', 'has-preview');
-      this.elements.previewStamp.hidden = true;
+    const currentPage = this.getCurrentPage();
+    if (!this.state.bundle || !currentPage) {
+      this.elements.previewPageLabel.textContent = 'No page';
+      this.elements.previewFileMeta.textContent = 'Upload a PDF to start placing the stamp.';
+      this.elements.previewEmpty.hidden = false;
       this.elements.previewCanvas.hidden = true;
-      this.elements.previewHint.hidden = false;
-      this.elements.previewHint.textContent = 'PDF preview will appear here';
+      this.elements.previewStamp.hidden = true;
+      this.elements.previewGuides.hidden = true;
+      this.elements.previewHint.hidden = true;
+      this.elements.previewFrame.classList.add('is-empty');
       return;
     }
 
-    this.elements.previewPageLabel.textContent = `Page ${this.state.previewPage} / ${this.state.bundle.pageCount}`;
-    this.elements.previewFileMeta.textContent = `${this.state.bundle.fields.length} detected field${this.state.bundle.fields.length === 1 ? '' : 's'}`;
-    this.elements.prevPageButton.disabled = this.state.previewPage <= 1 || this.state.busy;
-    this.elements.nextPageButton.disabled = this.state.previewPage >= this.state.bundle.pageCount || this.state.busy;
+    const pageIndex = this.getCurrentPageIndex();
+    const label = currentPage.kind === 'blank' ? 'Blank page' : `Page ${currentPage.pageNumber}`;
+    this.elements.previewPageLabel.textContent = `${label} ${pageIndex + 1} / ${this.state.pages.length}`;
+    this.elements.previewFileMeta.textContent = `${this.state.bundle.fileName} · ${this.state.bundle.pageCount} source page${this.state.bundle.pageCount === 1 ? '' : 's'}`;
+    this.elements.previewEmpty.hidden = true;
+    this.elements.previewFrame.classList.remove('is-empty');
     this.renderPreviewStamp();
   }
 
   private async renderPreview(): Promise<void> {
     const bundle = this.state.bundle;
-    if (!bundle) {
+    const currentPage = this.getCurrentPage();
+    if (!bundle || !currentPage) {
       return;
     }
 
     const renderToken = ++this.previewToken;
-    const hadPreview = this.elements.previewFrame.classList.contains('has-preview');
     this.elements.previewFrame.classList.add('is-loading');
-    this.elements.previewHint.hidden = false;
-    this.elements.previewHint.textContent = hadPreview
-      ? 'Rendering the selected page...'
-      : 'Rendering page preview...';
+    this.showPreviewHint(currentPage.kind === 'blank' ? 'Preparing blank page…' : 'Rendering page preview…');
 
     try {
-      const { renderPreviewPage } = await getPdfModule();
-      await renderPreviewPage(bundle.previewDocument, this.state.previewPage, this.elements.previewCanvas);
+      if (currentPage.kind === 'blank') {
+        renderBlankPreview(this.elements.previewCanvas, currentPage);
+      } else {
+        const { renderPreviewPage } = await getPdfModule();
+        await renderPreviewPage(bundle.previewDocument, currentPage.pageNumber, this.elements.previewCanvas);
+      }
+
       if (renderToken !== this.previewToken) {
         return;
       }
+
       this.elements.previewCanvas.hidden = false;
-      this.elements.previewFrame.classList.add('has-preview');
       this.elements.previewHint.hidden = true;
+      this.elements.previewFrame.classList.add('has-preview');
+      this.renderPreviewStamp();
     } catch (error) {
       console.error(error);
       if (renderToken !== this.previewToken) {
         return;
       }
-      if (!hadPreview) {
-        this.elements.previewCanvas.hidden = true;
-        this.elements.previewFrame.classList.remove('has-preview');
-        this.elements.previewStamp.hidden = true;
-      }
-      this.elements.previewHint.hidden = false;
-      this.elements.previewHint.textContent = 'Preview failed for this page';
+      this.elements.previewCanvas.hidden = true;
+      this.elements.previewFrame.classList.remove('has-preview');
+      this.showPreviewHint('Preview failed for this page');
+      this.elements.previewStamp.hidden = true;
     } finally {
       if (renderToken === this.previewToken) {
         this.elements.previewFrame.classList.remove('is-loading');
       }
     }
+  }
+
+  private renderPreviewStamp(): void {
+    const currentPage = this.getCurrentPage();
+    if (!currentPage || !shouldShowStampOnPage(this.state.stamp, currentPage.id)) {
+      this.elements.previewStamp.hidden = true;
+      this.elements.previewGuides.hidden = true;
+      this.elements.previewStamp.innerHTML = '';
+      return;
+    }
+
+    const hasImage = Boolean(this.state.stampImageUrl);
+    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
+    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
+    const rows = buildStampRows(this.state.stamp);
+    const placement = this.state.stamp.placement;
+    const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
+    const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
+
+    this.elements.previewGuides.hidden = !verticalGuide && !horizontalGuide;
+    this.elements.previewGuides.className = `preview-guides${verticalGuide ? ' show-vertical' : ''}${horizontalGuide ? ' show-horizontal' : ''}`;
+
+    this.elements.previewStamp.hidden = false;
+    this.updateContainerMarkup(this.elements.previewStamp, `
+      <div
+        class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}"
+        style="left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
+      >
+        <div class="preview-stamp-body">
+          <div class="preview-stamp-card">
+            ${showTable ? renderStampTable(rows, { editable: this.state.stampSelected }) : ''}
+            ${
+              showImage && this.state.stampImageUrl
+                ? `<img class="stamp-preview-image preview-stamp-image" src="${this.state.stampImageUrl}" alt="Preview stamp image" />`
+                : ''
+            }
+          </div>
+        </div>
+        ${this.state.stampSelected ? renderStampHandles() : ''}
+      </div>
+    `);
+  }
+
+  private renderAdvancedSheetVisibility(): void {
+    this.elements.advancedSheet.hidden = !this.state.advancedOpen;
   }
 
   private setNotice(message: string, tone: NoticeState['tone']): void {
@@ -985,7 +1321,7 @@ export class PdfStampStudio {
 
     this.previewResizeFrame = window.requestAnimationFrame(() => {
       this.previewResizeFrame = null;
-      if (this.state.bundle && !this.state.busy) {
+      if (this.state.bundle) {
         void this.renderPreview();
       }
     });
@@ -1001,44 +1337,40 @@ export class PdfStampStudio {
     restoreContainerRenderState(container, renderState);
   }
 
-  private renderPreviewStamp(): void {
-    if (
-      !this.state.bundle ||
-      !shouldShowStampOnPage(this.state.stamp, this.state.previewPage, this.state.bundle.pageCount)
-    ) {
-      this.elements.previewStamp.hidden = true;
-      this.elements.previewStamp.innerHTML = '';
-      return;
+  private getCurrentPage(): DocumentPageModel | null {
+    if (!this.state.previewPageId) {
+      return null;
     }
 
-    const hasImage = Boolean(this.state.stampImageUrl);
-    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
-    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
-    const rows = buildStampRows(this.state.stamp);
-
-    this.elements.previewStamp.className = `preview-stamp is-${this.state.stamp.alignment}`;
-    this.elements.previewStamp.hidden = false;
-    this.updateContainerMarkup(this.elements.previewStamp, `
-      <div class="preview-stamp-card">
-        ${showTable ? renderStampTable(rows, { editable: false }) : ''}
-        ${
-          showImage && this.state.stampImageUrl
-            ? `<img class="stamp-preview-image preview-stamp-image" src="${this.state.stampImageUrl}" alt="Preview stamp image" />`
-            : ''
-        }
-      </div>
-    `);
+    return this.state.pages.find((page) => page.id === this.state.previewPageId) ?? null;
   }
 
-  private renderControlState(): void {
-    this.elements.dropzone.disabled = this.state.busy;
-    this.elements.dropzone.setAttribute('aria-busy', String(this.state.busy));
-    this.elements.overwriteToggle.disabled = this.state.busy || !this.state.bundle;
+  private getCurrentPageIndex(): number {
+    if (!this.state.previewPageId) {
+      return -1;
+    }
+
+    return this.state.pages.findIndex((page) => page.id === this.state.previewPageId);
+  }
+
+  private getPreviewStageRect(): DOMRect | null {
+    if (this.elements.previewCanvas.hidden) {
+      return null;
+    }
+
+    return this.elements.previewCanvas.getBoundingClientRect();
+  }
+
+  private getInspectorSide(): 'left' | 'right' {
+    const currentPage = this.getCurrentPage();
+    if (!currentPage || !shouldShowStampOnPage(this.state.stamp, currentPage.id)) {
+      return 'right';
+    }
+
+    return this.state.stamp.placement.x > 0.56 ? 'left' : 'right';
   }
 
   private showPreviewHint(message: string): void {
-    this.elements.previewFrame.classList.add('is-loading');
-    this.elements.previewStamp.hidden = true;
     this.elements.previewHint.hidden = false;
     this.elements.previewHint.textContent = message;
   }
@@ -1047,100 +1379,86 @@ export class PdfStampStudio {
 function shellMarkup(): string {
   return `
     <div class="app-shell">
-      <header class="hero">
-        <div class="hero-copy-wrap">
-          <p class="eyebrow">Local-first PDF workflow</p>
-          <h1>Drop in a PDF, prefill the obvious bits, stamp it, and save a fresh copy.</h1>
-          <p class="hero-copy">
-            Built for repetitive admin forms. No dashboard, no queue, no server-side storage. Just a fast browser pass over a PDF and a download button.
-          </p>
+      <header class="topbar">
+        <div class="brand-block">
+          <p class="eyebrow">PDF Stamper</p>
+          <div class="brand-copy">Place one approval stamp exactly where it belongs.</div>
         </div>
-        <div class="privacy-banner">Ephemeral by default</div>
+        <div class="topbar-actions">
+          <button id="upload-button" class="ghost-button" type="button" data-action="choose-file">Upload PDF</button>
+          <button id="add-blank-page-button" class="ghost-button" type="button" data-action="add-blank-page">Add blank page</button>
+          <div class="topbar-page-nav">
+            <button id="prev-page-button" class="nav-button" type="button">Prev</button>
+            <span id="preview-page-label">No page</span>
+            <button id="next-page-button" class="nav-button" type="button">Next</button>
+          </div>
+          <div id="export-actions"></div>
+        </div>
+        <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
       </header>
 
-      <main class="workspace">
-        <section class="panel intake-panel">
-          <div class="panel-head">
-            <div>
-              <p class="section-tag">Start here</p>
-              <h2>Load a PDF</h2>
-            </div>
-            <p class="subtle-copy">Drag and drop or pick a file.</p>
-          </div>
-          <button type="button" id="dropzone" class="dropzone">
-            <span class="dropzone-title">Drop a PDF anywhere in this panel</span>
-            <span class="dropzone-copy">or click to choose one from disk</span>
-            <span class="dropzone-note">Nothing is uploaded. The PDF stays in this tab until you export.</span>
-          </button>
-          <input id="file-input" type="file" accept="application/pdf,.pdf" hidden />
-          <div id="status" class="status"></div>
-          <div id="summary" class="metric-grid"></div>
-        </section>
+      <main class="studio-shell">
+        <aside id="thumbnail-rail" class="thumbnail-rail"></aside>
 
-        <section class="panel preview-panel">
-          <div class="panel-head">
-            <div>
-              <p class="section-tag">Preview</p>
-              <h2>Page render</h2>
-            </div>
-            <div class="preview-meta-wrap">
-              <span id="preview-file-meta" class="subtle-copy">Drop a PDF to render the first page.</span>
-              <div class="preview-nav">
-                <button id="prev-page-button" class="nav-button" type="button">Prev</button>
-                <span id="preview-page-label">No preview</span>
-                <button id="next-page-button" class="nav-button" type="button">Next</button>
+        <section class="canvas-column">
+          <div id="preview-file-meta" class="preview-file-meta">Upload a PDF to start placing the stamp.</div>
+          <div id="preview-frame" class="preview-frame is-empty">
+            <div id="preview-empty" class="preview-empty">
+              <div class="preview-empty-copy">
+                <h1>Stamp PDFs without leaving the page.</h1>
+                <p>Upload a document, click once to place the stamp, then drag, resize, or rotate it directly on the page.</p>
+                <button class="action-button is-primary" type="button" data-action="choose-file">Upload a PDF</button>
+              </div>
+              <div class="preview-empty-paper">
+                <div class="preview-empty-lines"></div>
+                <div class="preview-empty-lines is-short"></div>
+                <div class="preview-empty-lines"></div>
+                <div class="preview-empty-lines is-short"></div>
+                <div class="preview-empty-sample">
+                  <span>PAYEE</span>
+                  <strong>Acme Insurance</strong>
+                </div>
               </div>
             </div>
-          </div>
-          <div id="preview-frame" class="preview-frame">
             <canvas id="preview-canvas" hidden></canvas>
+            <div id="preview-guides" class="preview-guides" hidden>
+              <div class="preview-guide is-vertical"></div>
+              <div class="preview-guide is-horizontal"></div>
+            </div>
             <div id="preview-stamp" class="preview-stamp" hidden></div>
-            <div id="preview-hint" class="preview-hint">PDF preview will appear here</div>
+            <div id="preview-hint" class="preview-hint" hidden></div>
           </div>
-        </section>
-
-        <section class="panel editor-panel">
-          <section class="editor-section">
-            <div class="panel-head compact-head">
-              <div>
-                <p class="section-tag">Shared details</p>
-                <h2>Auto-fill inputs</h2>
-              </div>
-              <label class="toggle">
-                <input id="overwrite-toggle" type="checkbox" />
-                Overwrite values already in the PDF
-              </label>
-            </div>
-            <div id="profile-fields" class="stack-form"></div>
-          </section>
-
-          <section class="editor-section">
-            <div class="panel-head compact-head">
-              <div>
-                <p class="section-tag">Stamp</p>
-                <h2>Bottom-of-page mark</h2>
-              </div>
-              <p class="subtle-copy">Approval table, image stamp, or both.</p>
-            </div>
-            <div id="stamp-controls"></div>
-          </section>
-
-          <section class="editor-section">
-            <div class="panel-head compact-head">
-              <div>
-                <p class="section-tag">Cleanup</p>
-                <h2>Detected PDF fields</h2>
-              </div>
-              <p class="subtle-copy">Manual overrides stay put.</p>
-            </div>
-            <div id="field-list" class="field-list"></div>
-          </section>
-
-          <section class="editor-section export-section">
-            <div id="export-panel"></div>
-          </section>
+          <div id="stamp-controls" class="floating-inspector"></div>
+          <div id="status" class="status"></div>
         </section>
       </main>
+
+      <section id="advanced-sheet" class="advanced-sheet" hidden>
+        <button class="advanced-sheet-scrim" type="button" data-action="close-advanced" aria-label="Close document fields"></button>
+        <div class="advanced-sheet-panel">
+          <div class="advanced-sheet-head">
+            <div>
+              <p class="eyebrow">Document Fields</p>
+              <h2>Shared details and raw field cleanup</h2>
+            </div>
+            <button class="ghost-button" type="button" data-action="close-advanced">Close</button>
+          </div>
+          <div class="advanced-section">
+            <label class="toggle">
+              <input id="overwrite-toggle" type="checkbox" />
+              Overwrite values already present in the PDF
+            </label>
+          </div>
+          <div class="advanced-section">
+            <div class="advanced-section-copy">Shared details can cascade into matching PDF fields.</div>
+            <div id="profile-fields" class="sheet-form"></div>
+          </div>
+          <div class="advanced-section">
+            <div class="advanced-section-copy">Manual overrides here always win.</div>
+            <div id="field-list" class="field-list"></div>
+          </div>
+        </div>
+      </section>
     </div>
   `;
 }
@@ -1157,8 +1475,13 @@ function defaultStampSettings(): StampSettings {
     approvedBy1: '',
     approvedBy2: '',
     date: todayInputValue(),
-    placement: 'last-page',
-    alignment: 'right',
+    placement: {
+      pageId: null,
+      x: 0.5,
+      y: 0.72,
+      width: 0.52,
+      rotation: 0,
+    },
     flatten: false,
     imageBytes: null,
     imageMime: null,
@@ -1166,28 +1489,104 @@ function defaultStampSettings(): StampSettings {
   };
 }
 
+function buildDocumentPages(pageSizes: PageSize[]): DocumentPageModel[] {
+  return pageSizes.map((size, index) => ({
+    id: `pdf-${index + 1}`,
+    kind: 'pdf',
+    pageNumber: index + 1,
+    width: size.width,
+    height: size.height,
+    label: `Page ${index + 1}`,
+  }));
+}
+
+function renderBlankPreview(canvas: HTMLCanvasElement, page: DocumentPageModel): void {
+  const parentWidth = Math.max(380, Math.min(canvas.parentElement?.clientWidth ?? 860, 980));
+  const scale = Math.min(1.5, parentWidth / page.width);
+  const width = page.width * scale;
+  const height = page.height * scale;
+  const pixelRatio = window.devicePixelRatio || 1;
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Canvas rendering is not available in this browser.');
+  }
+
+  canvas.width = Math.floor(width * pixelRatio);
+  canvas.height = Math.floor(height * pixelRatio);
+  canvas.style.width = `${width}px`;
+  canvas.style.height = `${height}px`;
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = '#fffdf9';
+  context.fillRect(0, 0, width, height);
+}
+
+function placementFromPointer(
+  pageId: string,
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  widthRatio: number,
+): StampPlacement {
+  const halfWidth = (rect.width * widthRatio) / 2;
+  const safeX = clampValue(clientX - rect.left, halfWidth, rect.width - halfWidth);
+  const safeY = clampValue(clientY - rect.top, 90, rect.height - 90);
+  return {
+    pageId,
+    x: safeX / rect.width,
+    y: safeY / rect.height,
+    width: widthRatio,
+    rotation: 0,
+  };
+}
+
+function scaleRatioFromHandle(
+  handle: ResizeHandle,
+  input: {
+    centerX: number;
+    centerY: number;
+    startX: number;
+    startY: number;
+    currentX: number;
+    currentY: number;
+    startWidth: number;
+    startHeight: number;
+  },
+): number {
+  const startDx = input.startX - input.centerX;
+  const startDy = input.startY - input.centerY;
+  const currentDx = input.currentX - input.centerX;
+  const currentDy = input.currentY - input.centerY;
+
+  if (handle === 'e' || handle === 'w') {
+    return Math.max(0.4, Math.abs(currentDx) / Math.max(1, Math.abs(startDx)));
+  }
+
+  if (handle === 'n' || handle === 's') {
+    return Math.max(0.4, Math.abs(currentDy) / Math.max(1, Math.abs(startDy)));
+  }
+
+  const widthScale = Math.abs(currentDx) / Math.max(1, Math.abs(startDx));
+  const heightScale = Math.abs(currentDy) / Math.max(1, Math.abs(startDy));
+  return Math.max(0.4, Math.max(widthScale, heightScale));
+}
+
 function renderStampTable(
   rows: ReturnType<typeof buildStampRows>,
-  options: { editable: boolean; disabled?: boolean },
+  options: { editable: boolean },
 ): string {
   return `
     <div class="stamp-table-preview ${options.editable ? 'is-editor' : ''}">
       ${rows
-        .map((row) =>
-          options.editable
-            ? renderEditableStampRow(row, options.disabled ?? false)
-            : renderReadonlyStampRow(row),
-        )
+        .map((row) => (options.editable ? renderEditableStampRow(row) : renderReadonlyStampRow(row)))
         .join('')}
     </div>
   `;
 }
 
-function renderEditableStampRow(
-  row: ReturnType<typeof buildStampRows>[number],
-  disabled: boolean,
-): string {
-  const disabledAttr = disabled ? 'disabled' : '';
+function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
   const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
   const inputClass = row.emphasis ? 'stamp-table-input is-emphasis' : 'stamp-table-input';
   return `
@@ -1200,7 +1599,6 @@ function renderEditableStampRow(
           type="text"
           value="${escapeAttribute(row.value)}"
           placeholder="${escapeAttribute(row.placeholder)}"
-          ${disabledAttr}
         />
       </span>
     </label>
@@ -1218,8 +1616,18 @@ function renderReadonlyStampRow(row: ReturnType<typeof buildStampRows>[number]):
   `;
 }
 
-function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
-  const disabledAttr = disabled ? 'disabled' : '';
+function renderStampHandles(): string {
+  return `
+    <div class="stamp-selection">
+      <button type="button" class="stamp-rotate-handle" data-stamp-action="rotate-stamp" aria-label="Rotate stamp"></button>
+      ${['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+        .map((handle) => `<button type="button" class="stamp-handle is-${handle}" data-stamp-handle="${handle}" aria-label="Resize stamp ${handle}"></button>`)
+        .join('')}
+    </div>
+  `;
+}
+
+function renderFieldControl(field: PdfFieldModel): string {
   if (!isEditableField(field)) {
     return '<div class="readonly-field">Unsupported by this first pass</div>';
   }
@@ -1227,7 +1635,7 @@ function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
   if (field.kind === 'checkbox') {
     return `
       <label class="checkbox-field">
-        <input data-field-id="${field.id}" type="checkbox" ${field.value === true ? 'checked' : ''} ${disabledAttr} />
+        <input data-field-id="${field.id}" type="checkbox" ${field.value === true ? 'checked' : ''} />
         Tick this box
       </label>
     `;
@@ -1235,7 +1643,7 @@ function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
 
   if (field.kind === 'dropdown' || field.kind === 'radio' || field.kind === 'option-list') {
     return `
-      <select data-field-id="${field.id}" ${disabledAttr}>
+      <select data-field-id="${field.id}">
         <option value="">Leave blank</option>
         ${field.options.map((option) => {
           const selected = field.value === option ? 'selected' : '';
@@ -1245,12 +1653,15 @@ function renderFieldControl(field: PdfFieldModel, disabled: boolean): string {
     `;
   }
 
-  return `<input data-field-id="${field.id}" type="text" value="${escapeAttribute(typeof field.value === 'string' ? field.value : '')}" ${disabledAttr} />`;
+  return `<input data-field-id="${field.id}" type="text" value="${escapeAttribute(typeof field.value === 'string' ? field.value : '')}" />`;
 }
 
 function cloneStampSettings(stamp: StampSettings): StampSettings {
   return {
     ...stamp,
+    placement: {
+      ...stamp.placement,
+    },
     imageBytes: stamp.imageBytes ? new Uint8Array(stamp.imageBytes) : null,
   };
 }
@@ -1382,4 +1793,34 @@ function hasTextSelection(
   }
 
   return element instanceof HTMLInputElement && !['checkbox', 'date', 'file'].includes(element.type);
+}
+
+function isStampValueKey(key: keyof StampSettings): key is
+  | 'payee'
+  | 'totalAmount'
+  | 'gstAmount'
+  | 'movementNumber'
+  | 'signedBy'
+  | 'coSignedBy'
+  | 'approvedBy1'
+  | 'approvedBy2' {
+  return [
+    'payee',
+    'totalAmount',
+    'gstAmount',
+    'movementNumber',
+    'signedBy',
+    'coSignedBy',
+    'approvedBy1',
+    'approvedBy2',
+  ].includes(key);
+}
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeDegrees(value: number): number {
+  const normalized = value % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
 }
