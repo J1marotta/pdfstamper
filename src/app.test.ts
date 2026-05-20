@@ -15,6 +15,9 @@ describe('PdfStampStudio shell', () => {
     expect(root).not.toBeNull();
     new PdfStampStudio(root!);
 
+    const topbar = document.querySelector('#topbar') as HTMLElement | null;
+    expect(topbar).not.toBeNull();
+    expect(topbar?.hidden).toBe(true);
     expect(document.querySelector('#upload-button')).not.toBeNull();
     expect(document.querySelector('#preview-frame')).not.toBeNull();
     expect(document.querySelector('#thumbnail-rail')).not.toBeNull();
@@ -81,6 +84,30 @@ describe('PdfStampStudio shell', () => {
     expect(previewStamp?.hidden).toBe(false);
     expect(previewStamp?.textContent).toContain('Acme Pty Ltd');
     expect(previewStamp?.textContent).toContain('$100.00');
+  });
+
+  it('reveals the top bar once a document bundle exists', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+      };
+      renderControlState: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.renderControlState();
+
+    const topbar = document.querySelector('#topbar') as HTMLElement | null;
+    expect(topbar).not.toBeNull();
+    expect(topbar?.hidden).toBe(false);
   });
 
   it('clears a stale download link after direct stamp editing', () => {

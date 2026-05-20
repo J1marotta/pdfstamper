@@ -53,6 +53,7 @@ interface AppState {
 }
 
 interface AppElements {
+  topbar: HTMLElement;
   fileInput: HTMLInputElement;
   uploadButton: HTMLButtonElement;
   addBlankPageButton: HTMLButtonElement;
@@ -136,6 +137,7 @@ export class PdfStampStudio {
     this.root = root;
     this.root.innerHTML = shellMarkup();
     this.elements = {
+      topbar: this.root.querySelector<HTMLElement>('#topbar')!,
       fileInput: this.root.querySelector<HTMLInputElement>('#file-input')!,
       uploadButton: this.root.querySelector<HTMLButtonElement>('#upload-button')!,
       addBlankPageButton: this.root.querySelector<HTMLButtonElement>('#add-blank-page-button')!,
@@ -903,6 +905,7 @@ export class PdfStampStudio {
   }
 
   private renderAll(): void {
+    this.renderTopbarVisibility();
     this.renderControlState();
     this.renderStatus();
     this.renderThumbnailRail();
@@ -915,6 +918,7 @@ export class PdfStampStudio {
   }
 
   private renderControlState(): void {
+    this.renderTopbarVisibility();
     this.elements.uploadButton.disabled = this.state.loadingPdf;
     this.elements.addBlankPageButton.disabled = !this.state.bundle || this.state.loadingPdf;
     const currentIndex = this.getCurrentPageIndex();
@@ -926,6 +930,10 @@ export class PdfStampStudio {
   private renderStatus(): void {
     this.elements.status.className = `status is-${this.state.notice.tone}`;
     this.elements.status.textContent = this.state.notice.message;
+  }
+
+  private renderTopbarVisibility(): void {
+    this.elements.topbar.hidden = !this.state.bundle;
   }
 
   private renderThumbnailRail(): void {
@@ -1379,7 +1387,7 @@ export class PdfStampStudio {
 function shellMarkup(): string {
   return `
     <div class="app-shell">
-      <header class="topbar">
+      <header id="topbar" class="topbar">
         <div class="brand-block">
           <p class="eyebrow">PDF Stamper</p>
           <div class="brand-copy">Place one approval stamp exactly where it belongs.</div>
