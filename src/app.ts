@@ -270,11 +270,18 @@ export class PdfStampStudio {
         return;
       }
 
-      const file = Array.from(event.dataTransfer?.files ?? []).find((candidate) =>
+      const droppedFiles = Array.from(event.dataTransfer?.files ?? []);
+      const file = droppedFiles.find((candidate) =>
         candidate.name.toLowerCase().endsWith('.pdf'),
       );
       if (file) {
         void this.handlePdf(file);
+        return;
+      }
+
+      if (droppedFiles.length > 0) {
+        this.setNotice('Drop a PDF file to load it here.', 'error');
+        this.renderStatus();
       }
     });
 
@@ -365,12 +372,6 @@ export class PdfStampStudio {
         return;
       }
 
-      const stageRect = this.getPreviewStageRect();
-      const stampBody = this.elements.previewStamp.querySelector<HTMLElement>('.preview-stamp-body');
-      if (!stageRect || !stampBody) {
-        return;
-      }
-
       const handle = target.closest<HTMLElement>('[data-stamp-handle]')?.dataset.stampHandle as ResizeHandle | undefined;
       const rotateHandle = target.closest<HTMLElement>('[data-stamp-action="rotate-stamp"]');
       const stampCard = target.closest<HTMLElement>('.preview-stamp-object');
@@ -387,6 +388,11 @@ export class PdfStampStudio {
         this.state.stampSelected = true;
         this.renderStampControls();
         this.renderPreviewStamp();
+      }
+
+      const stageRect = this.getPreviewStageRect();
+      const stampBody = this.elements.previewStamp.querySelector<HTMLElement>('.preview-stamp-body');
+      if (!stageRect || !stampBody) {
         return;
       }
 
@@ -541,6 +547,7 @@ export class PdfStampStudio {
 
       this.state.previewPageId = this.state.pages[currentIndex - 1]?.id ?? null;
       this.state.stampSelected = false;
+      this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
       this.renderPreviewMeta();
@@ -555,6 +562,7 @@ export class PdfStampStudio {
 
       this.state.previewPageId = this.state.pages[currentIndex + 1]?.id ?? null;
       this.state.stampSelected = false;
+      this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
       this.renderPreviewMeta();
@@ -574,6 +582,7 @@ export class PdfStampStudio {
 
       this.state.previewPageId = pageId;
       this.state.stampSelected = false;
+      this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
       this.renderPreviewMeta();
@@ -637,6 +646,7 @@ export class PdfStampStudio {
       startY: interaction.startClientY,
       currentX: event.clientX,
       currentY: event.clientY,
+      rotation: interaction.startPlacement.rotation,
       startWidth: interaction.startWidthPx,
       startHeight: interaction.startHeightPx,
     });
@@ -871,6 +881,7 @@ export class PdfStampStudio {
     this.state.previewPageId = blankPage.id;
     this.state.stampSelected = false;
     this.invalidateLastExport();
+    this.renderControlState();
     this.renderThumbnailRail();
     this.renderStampControls();
     this.renderPreviewMeta();
@@ -941,6 +952,7 @@ export class PdfStampStudio {
     this.elements.previewFileMeta.hidden = !hasBundle;
     this.elements.stampControls.hidden = !hasBundle;
     this.elements.status.hidden = !hasBundle && this.state.notice.tone === 'neutral';
+    this.elements.advancedSheet.hidden = !hasBundle || !this.state.advancedOpen;
   }
 
   private renderThumbnailRail(): void {
@@ -1257,9 +1269,7 @@ export class PdfStampStudio {
           ? 'grabbing'
           : this.stampInteraction?.kind === 'rotate'
             ? 'grabbing'
-            : this.state.stampSelected
-              ? 'grab'
-              : 'pointer';
+            : 'grab';
 
     this.elements.previewGuides.hidden = !verticalGuide && !horizontalGuide;
     this.elements.previewGuides.className = `preview-guides${verticalGuide ? ' show-vertical' : ''}${horizontalGuide ? ' show-horizontal' : ''}`;
@@ -1287,7 +1297,7 @@ export class PdfStampStudio {
   }
 
   private renderAdvancedSheetVisibility(): void {
-    this.elements.advancedSheet.hidden = !this.state.advancedOpen;
+    this.elements.advancedSheet.hidden = !this.state.bundle || !this.state.advancedOpen;
   }
 
   private syncPreviewOverlayFrame(): void {
@@ -1621,14 +1631,25 @@ function scaleRatioFromHandle(
     startY: number;
     currentX: number;
     currentY: number;
+    rotation: number;
     startWidth: number;
     startHeight: number;
   },
 ): number {
-  const startDx = input.startX - input.centerX;
-  const startDy = input.startY - input.centerY;
-  const currentDx = input.currentX - input.centerX;
-  const currentDy = input.currentY - input.centerY;
+  const startVector = rotateVector(
+    input.startX - input.centerX,
+    input.startY - input.centerY,
+    -input.rotation,
+  );
+  const currentVector = rotateVector(
+    input.currentX - input.centerX,
+    input.currentY - input.centerY,
+    -input.rotation,
+  );
+  const startDx = startVector.x;
+  const startDy = startVector.y;
+  const currentDx = currentVector.x;
+  const currentDy = currentVector.y;
 
   if (handle === 'e' || handle === 'w') {
     return Math.max(0.4, Math.abs(currentDx) / Math.max(1, Math.abs(startDx)));
@@ -1893,6 +1914,18 @@ function clampValue(value: number, min: number, max: number): number {
 function normalizeDegrees(value: number): number {
   const normalized = value % 360;
   return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function rotateVector(x: number, y: number, degreesValue: number): { x: number; y: number } {
+  if (degreesValue === 0) {
+    return { x, y };
+  }
+
+  const radians = (degreesValue * Math.PI) / 180;
+  return {
+    x: x * Math.cos(radians) - y * Math.sin(radians),
+    y: x * Math.sin(radians) + y * Math.cos(radians),
+  };
 }
 
 function cursorForHandle(handle: ResizeHandle, rotation: number): string {

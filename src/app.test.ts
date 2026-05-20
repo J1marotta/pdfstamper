@@ -133,6 +133,62 @@ describe('PdfStampStudio shell', () => {
     expect((document.querySelector('#preview-file-meta') as HTMLElement | null)?.hidden).toBe(false);
   });
 
+  it('updates page navigation button states when the active page changes', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreview: () => Promise<void>;
+    };
+
+    internalStudio.renderPreview = vi.fn(async () => undefined);
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 2,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+      {
+        id: 'pdf-2',
+        kind: 'pdf',
+        pageNumber: 2,
+        width: 595,
+        height: 842,
+        label: 'Page 2',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+
+    const prevButton = document.querySelector('#prev-page-button') as HTMLButtonElement | null;
+    const nextButton = document.querySelector('#next-page-button') as HTMLButtonElement | null;
+    expect(prevButton?.disabled).toBe(true);
+    expect(nextButton?.disabled).toBe(false);
+
+    nextButton!.click();
+
+    expect(prevButton?.disabled).toBe(false);
+    expect(nextButton?.disabled).toBe(true);
+    expect(document.querySelector('#preview-page-label')?.textContent).toContain('Page 2 2 / 2');
+  });
+
   it('starts a resize interaction from a handle and exposes the matching cursor', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
@@ -221,6 +277,181 @@ describe('PdfStampStudio shell', () => {
     expect(internalStudio.stampInteraction?.handle).toBe('e');
   });
 
+  it('lets you drag a placed stamp on the first pointerdown and advertises a grab cursor', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      stampInteraction: { kind: string; handle?: string } | null;
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = false;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.5,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    previewCanvas!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 800,
+        right: 600,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const stampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(stampBody).not.toBeNull();
+    expect(stampBody?.getAttribute('style')).toContain('cursor:grab');
+
+    const pointerDown = Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 300,
+      clientY: 400,
+    });
+    stampBody!.dispatchEvent(pointerDown);
+
+    expect(internalStudio.state.stampSelected).toBe(true);
+    expect(internalStudio.stampInteraction?.kind).toBe('drag');
+  });
+
+  it('resizes a rotated stamp along the rotated handle direction', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.5,
+        width: 0.5,
+        rotation: 90,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    previewCanvas!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 800,
+        right: 600,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const stampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(stampBody).not.toBeNull();
+    Object.defineProperty(stampBody!, 'offsetWidth', { configurable: true, value: 240 });
+    Object.defineProperty(stampBody!, 'offsetHeight', { configurable: true, value: 120 });
+
+    const eastHandle = document.querySelector('.stamp-handle.is-e') as HTMLElement | null;
+    expect(eastHandle).not.toBeNull();
+    expect(eastHandle?.getAttribute('style')).toContain('cursor:ns-resize');
+
+    const pointerDown = Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 300,
+      clientY: 460,
+    });
+    eastHandle!.dispatchEvent(pointerDown);
+
+    const pointerMove = Object.assign(new Event('pointermove', { bubbles: true, cancelable: true }), {
+      clientX: 300,
+      clientY: 520,
+    });
+    window.dispatchEvent(pointerMove);
+
+    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(0.5);
+
+    window.dispatchEvent(new Event('pointerup'));
+  });
+
   it('reveals status for pre-upload errors instead of leaving it hidden', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
@@ -246,6 +477,29 @@ describe('PdfStampStudio shell', () => {
 
     expect(status?.hidden).toBe(false);
     expect(status?.textContent).toContain('Use a PDF file for this workflow.');
+  });
+
+  it('shows a clear error when a non-PDF file is dropped onto the preview stage', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    new PdfStampStudio(root!);
+
+    const previewFrame = document.querySelector('#preview-frame') as HTMLElement | null;
+    const status = document.querySelector('#status') as HTMLElement | null;
+    expect(previewFrame).not.toBeNull();
+    expect(status).not.toBeNull();
+
+    const dropEvent = Object.assign(new Event('drop', { bubbles: true, cancelable: true }), {
+      dataTransfer: {
+        files: [new File(['plain text'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+    previewFrame!.dispatchEvent(dropEvent);
+
+    expect(status?.hidden).toBe(false);
+    expect(status?.textContent).toContain('Drop a PDF file to load it here.');
   });
 
   it('locks the visible stamp overlay to the rendered canvas bounds', () => {
@@ -388,5 +642,36 @@ describe('PdfStampStudio shell', () => {
     expect(revokeSpy).toHaveBeenCalledWith('blob:stale-export');
     expect(document.querySelector('.action-button[href]')).toBeNull();
     expect(document.querySelector('#export-actions')?.textContent).toContain('Export stamped PDF');
+  });
+
+  it('hides the document-fields sheet again when there is no loaded document', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        advancedOpen: boolean;
+        bundle: { fileName: string; pageCount: number } | null;
+      };
+      renderAdvancedSheetVisibility: () => void;
+      renderControlState: () => void;
+    };
+
+    const advancedSheet = document.querySelector('#advanced-sheet') as HTMLElement | null;
+    expect(advancedSheet).not.toBeNull();
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.advancedOpen = true;
+    internalStudio.renderAdvancedSheetVisibility();
+    expect(advancedSheet?.hidden).toBe(false);
+
+    internalStudio.state.bundle = null;
+    internalStudio.renderControlState();
+    expect(advancedSheet?.hidden).toBe(true);
   });
 });
