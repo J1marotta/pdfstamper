@@ -1,5 +1,5 @@
 import { PDFDocument } from 'pdf-lib';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import type { DocumentPageModel, StampSettings } from './types';
 
@@ -110,51 +110,5 @@ describe('exportFilledPdf', () => {
     const exported = await PDFDocument.load(await blob.arrayBuffer());
 
     expect(exported.getPageCount()).toBe(2);
-  });
-});
-
-describe('downloadBlob', () => {
-  const originalCreateObjectURL = URL.createObjectURL;
-  const originalRevokeObjectURL = URL.revokeObjectURL;
-  const originalRequestAnimationFrame = window.requestAnimationFrame;
-
-  beforeEach(() => {
-    URL.createObjectURL = vi.fn(() => 'blob:test-url');
-    URL.revokeObjectURL = vi.fn();
-    window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
-      callback(0);
-      return 1;
-    });
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    document.body.innerHTML = '';
-    URL.createObjectURL = originalCreateObjectURL;
-    URL.revokeObjectURL = originalRevokeObjectURL;
-    window.requestAnimationFrame = originalRequestAnimationFrame;
-    vi.useRealTimers();
-    vi.restoreAllMocks();
-  });
-
-  it('creates a downloadable anchor and cleans it up later', async () => {
-    const { downloadBlob } = await import('./pdf');
-    const appendSpy = vi.spyOn(document.body, 'append');
-    const clickSpy = vi
-      .spyOn(HTMLAnchorElement.prototype, 'click')
-      .mockImplementation(() => undefined);
-
-    downloadBlob(new Blob(['hello'], { type: 'application/pdf' }), 'example.pdf');
-
-    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
-    expect(appendSpy).toHaveBeenCalledTimes(1);
-    expect(clickSpy).toHaveBeenCalledTimes(1);
-
-    const anchor = appendSpy.mock.calls[0]?.[0];
-    expect(anchor).toBeInstanceOf(HTMLAnchorElement);
-    expect((anchor as HTMLAnchorElement).download).toBe('example.pdf');
-
-    vi.runAllTimers();
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test-url');
   });
 });

@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const exportFilledPdf = vi.fn(async () => new Blob(['%PDF-1.7 test'], { type: 'application/pdf' }));
-const downloadBlob = vi.fn();
 
 vi.mock('./pdf', () => ({
   exportFilledPdf,
-  downloadBlob,
   loadPdfBundle: vi.fn(),
   renderPreviewPage: vi.fn(),
 }));
@@ -18,7 +16,11 @@ describe('PdfStampStudio export flow', () => {
     vi.resetModules();
     vi.clearAllMocks();
     document.body.innerHTML = '<div id="app"></div>';
-    URL.createObjectURL = vi.fn(() => 'blob:latest-export');
+    let urlCounter = 0;
+    URL.createObjectURL = vi.fn(() => {
+      urlCounter += 1;
+      return `blob:latest-export-${urlCounter}`;
+    });
     URL.revokeObjectURL = vi.fn();
   });
 
@@ -29,11 +31,11 @@ describe('PdfStampStudio export flow', () => {
     vi.restoreAllMocks();
   });
 
-  it('keeps the download action available after generating a stamped PDF', async () => {
-    const { PdfStampStudio } = await import('./app');
+  async function seedReadyStudio() {
     const root = document.getElementById('app');
 
     expect(root).not.toBeNull();
+    const { PdfStampStudio } = await import('./app');
     const studio = new PdfStampStudio(root!);
     const internalStudio = studio as unknown as {
       state: {
@@ -51,6 +53,8 @@ describe('PdfStampStudio export flow', () => {
         exporting: boolean;
       };
       handleExport: () => Promise<void>;
+      renderControlState: () => void;
+      renderExportPanel: () => void;
     };
 
     internalStudio.state.bundle = {
@@ -76,16 +80,43 @@ describe('PdfStampStudio export flow', () => {
     internalStudio.state.previewPageId = 'pdf-1';
     internalStudio.state.loadingPdf = false;
     internalStudio.state.exporting = false;
+    internalStudio.renderControlState();
+    internalStudio.renderExportPanel();
+
+    return internalStudio;
+  }
+
+  it('keeps a visible download link available after generating a stamped PDF', async () => {
+    const internalStudio = await seedReadyStudio();
+
+    expect(document.querySelector('#export-actions')?.textContent).toContain('Generate stamped PDF');
 
     await internalStudio.handleExport();
 
     expect(exportFilledPdf).toHaveBeenCalledTimes(1);
-    expect(downloadBlob).toHaveBeenCalledTimes(1);
-    expect(downloadBlob.mock.calls[0]?.[1]).toBe('resume-stamped.pdf');
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
 
     const primaryLink = document.querySelector('.action-button[href]') as HTMLAnchorElement | null;
     expect(primaryLink).not.toBeNull();
-    expect(primaryLink?.href).toContain('blob:latest-export');
+    expect(primaryLink?.textContent).toContain('Download stamped PDF');
+    expect(primaryLink?.href).toContain('blob:latest-export-1');
+    expect(primaryLink?.download).toBe('resume-stamped.pdf');
+    expect(document.querySelector('#export-actions')?.textContent).toContain('Regenerate');
+  });
+
+  it('replaces the ready-to-download link on re-export and revokes the previous url', async () => {
+    const internalStudio = await seedReadyStudio();
+
+    await internalStudio.handleExport();
+    await internalStudio.handleExport();
+
+    expect(exportFilledPdf).toHaveBeenCalledTimes(2);
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:latest-export-1');
+
+    const primaryLink = document.querySelector('.action-button[href]') as HTMLAnchorElement | null;
+    expect(primaryLink).not.toBeNull();
+    expect(primaryLink?.href).toContain('blob:latest-export-2');
     expect(primaryLink?.download).toBe('resume-stamped.pdf');
   });
 });

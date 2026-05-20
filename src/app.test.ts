@@ -643,7 +643,7 @@ describe('PdfStampStudio shell', () => {
 
     expect(revokeSpy).toHaveBeenCalledWith('blob:stale-export');
     expect(document.querySelector('.action-button[href]')).toBeNull();
-    expect(document.querySelector('#export-actions')?.textContent).toContain('Export stamped PDF');
+    expect(document.querySelector('#export-actions')?.textContent).toContain('Generate stamped PDF');
   });
 
   it('hides the document-fields sheet again when there is no loaded document', () => {

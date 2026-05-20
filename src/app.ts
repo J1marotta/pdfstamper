@@ -829,7 +829,7 @@ export class PdfStampStudio {
     const pages = this.state.pages.map((page) => ({ ...page }));
 
     try {
-      const { exportFilledPdf, downloadBlob } = await getPdfModule();
+      const { exportFilledPdf } = await getPdfModule();
       this.state.exporting = true;
       this.setNotice('Generating the stamped PDF locally…', 'busy');
       this.renderStatus();
@@ -838,11 +838,7 @@ export class PdfStampStudio {
 
       const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages);
       this.setLastExport(blob, outputName);
-      downloadBlob(blob, outputName);
-      this.setNotice(
-        'Stamped PDF is ready. If the browser blocked the save prompt, use the download action in the top bar.',
-        'success',
-      );
+      this.setNotice('Stamped PDF is ready. Click Download stamped PDF.', 'success');
     } catch (error) {
       console.error(error);
       this.setNotice('Export failed. Some PDFs have unusual field structures that need a custom fallback.', 'error');
@@ -1167,7 +1163,7 @@ export class PdfStampStudio {
         `
         : `
           <button type="button" class="action-button is-primary" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-            ${this.state.exporting ? 'Working…' : 'Export stamped PDF'}
+            ${this.state.exporting ? 'Working…' : 'Generate stamped PDF'}
           </button>
         `;
 
