@@ -22,26 +22,6 @@ GlobalWorkerOptions.workerSrc = workerUrl;
 
 type PreviewDocument = Awaited<ReturnType<typeof getDocument>['promise']>;
 
-interface FilePickerSaveTarget {
-  kind: 'picker';
-  handle: FileSystemFileHandleLike;
-}
-
-interface DownloadSaveTarget {
-  kind: 'download';
-}
-
-type PdfSaveTarget = DownloadSaveTarget | FilePickerSaveTarget;
-
-interface FileSystemFileHandleLike {
-  createWritable(): Promise<FileSystemWritableFileStreamLike>;
-}
-
-interface FileSystemWritableFileStreamLike {
-  write(data: Blob): Promise<void>;
-  close(): Promise<void>;
-}
-
 export interface LoadedPdfBundle {
   fileName: string;
   sourceBytes: Uint8Array;
@@ -166,60 +146,6 @@ export function downloadBlob(blob: Blob, fileName: string): void {
     anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   });
-}
-
-export async function preparePdfSaveTarget(fileName: string): Promise<PdfSaveTarget> {
-  const showSaveFilePicker = (window as Window & {
-    showSaveFilePicker?: (
-      options: SaveFilePickerOptionsLike,
-    ) => Promise<FileSystemFileHandleLike>;
-  }).showSaveFilePicker;
-
-  if (typeof showSaveFilePicker !== 'function') {
-    return { kind: 'download' };
-  }
-
-  try {
-    const handle = await showSaveFilePicker({
-      suggestedName: fileName,
-      types: [
-        {
-          description: 'PDF document',
-          accept: {
-            'application/pdf': ['.pdf'],
-          },
-        },
-      ],
-    });
-
-    return {
-      kind: 'picker',
-      handle,
-    };
-  } catch (error) {
-    if (isAbortError(error)) {
-      throw new SaveCancelledError();
-    }
-
-    console.warn('Falling back to browser download for PDF export.', error);
-    return { kind: 'download' };
-  }
-}
-
-export async function savePdfOutput(
-  blob: Blob,
-  fileName: string,
-  target: PdfSaveTarget,
-): Promise<PdfSaveTarget['kind']> {
-  if (target.kind === 'picker') {
-    const writable = await target.handle.createWritable();
-    await writable.write(blob);
-    await writable.close();
-    return 'picker';
-  }
-
-  downloadBlob(blob, fileName);
-  return 'download';
 }
 
 function extractFields(document: PDFDocument): PdfFieldModel[] {
@@ -588,25 +514,4 @@ function wrapText(text: string, maxCharsPerLine: number, maxLines: number): stri
     }
     return line;
   });
-}
-
-interface SaveFilePickerOptionsLike {
-  suggestedName?: string;
-  types?: Array<{
-    accept: Record<string, string[]>;
-    description?: string;
-  }>;
-}
-
-class SaveCancelledError extends Error {
-  constructor() {
-    super('The user canceled the save dialog.');
-    this.name = 'SaveCancelledError';
-  }
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof DOMException
-    ? error.name === 'AbortError'
-    : error instanceof Error && error.name === 'AbortError';
 }

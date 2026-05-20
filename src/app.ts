@@ -503,12 +503,8 @@ export class PdfStampStudio {
       options: [...field.options],
     }));
     const stamp = cloneStampSettings(this.state.stamp);
-    let saveTarget: Awaited<ReturnType<(typeof import('./pdf'))['preparePdfSaveTarget']>>;
-
     try {
-      const { exportFilledPdf, preparePdfSaveTarget, savePdfOutput } = await getPdfModule();
-      saveTarget = await preparePdfSaveTarget(outputName);
-
+      const { exportFilledPdf, downloadBlob } = await getPdfModule();
       this.state.busy = true;
       this.setNotice('Generating the stamped PDF locally...', 'busy');
       this.renderStatus();
@@ -521,21 +517,15 @@ export class PdfStampStudio {
         fields,
         stamp,
       );
-      const saveMethod = await savePdfOutput(blob, outputName, saveTarget);
       this.setLastExport(blob, outputName);
+      downloadBlob(blob, outputName);
       this.setNotice(
-        saveMethod === 'picker'
-          ? 'Export complete. The source PDF was not uploaded or stored.'
-          : 'Export complete. If your browser blocked the automatic download, use the retry link below.',
+        'Export complete. If your browser blocked the automatic download, use the retry link below.',
         'success',
       );
     } catch (error) {
-      if (isSaveCancelledError(error)) {
-        this.setNotice('Save canceled. The source PDF is unchanged.', 'neutral');
-      } else {
-        console.error(error);
-        this.setNotice('Export failed. Some PDFs have unusual field structures that need a custom fallback.', 'error');
-      }
+      console.error(error);
+      this.setNotice('Export failed. Some PDFs have unusual field structures that need a custom fallback.', 'error');
     } finally {
       this.state.busy = false;
       this.renderControlState();
@@ -853,7 +843,7 @@ export class PdfStampStudio {
     const retryLink =
       this.state.lastExportUrl && this.state.lastExportName
         ? `
-          <a class="export-retry-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}">
+          <a class="export-retry-link" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" target="_blank" rel="noopener">
             Save latest export again
           </a>
         `
@@ -1229,10 +1219,6 @@ function cloneStampSettings(stamp: StampSettings): StampSettings {
     ...stamp,
     imageBytes: stamp.imageBytes ? new Uint8Array(stamp.imageBytes) : null,
   };
-}
-
-function isSaveCancelledError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'SaveCancelledError';
 }
 
 function selectOption(value: string, label: string, selectedValue: string): string {
