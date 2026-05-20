@@ -179,6 +179,10 @@ button {
   align-items: start;
 }
 
+.studio-shell.is-empty-state {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .thumbnail-rail {
   display: grid;
   gap: 12px;
@@ -287,6 +291,7 @@ button {
   position: relative;
   display: grid;
   gap: 14px;
+  min-width: 0;
   min-height: calc(100vh - 120px);
   padding: 18px 18px 28px;
   border-radius: 28px;

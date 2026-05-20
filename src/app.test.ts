@@ -18,6 +18,7 @@ describe('PdfStampStudio shell', () => {
     const topbar = document.querySelector('#topbar') as HTMLElement | null;
     expect(topbar).not.toBeNull();
     expect(topbar?.hidden).toBe(true);
+    expect((document.querySelector('.studio-shell') as HTMLElement | null)?.classList.contains('is-empty-state')).toBe(true);
     expect((document.querySelector('#thumbnail-rail') as HTMLElement | null)?.hidden).toBe(true);
     expect((document.querySelector('#stamp-controls') as HTMLElement | null)?.hidden).toBe(true);
     expect((document.querySelector('#preview-file-meta') as HTMLElement | null)?.hidden).toBe(true);
@@ -127,6 +128,7 @@ describe('PdfStampStudio shell', () => {
     const topbar = document.querySelector('#topbar') as HTMLElement | null;
     expect(topbar).not.toBeNull();
     expect(topbar?.hidden).toBe(false);
+    expect((document.querySelector('.studio-shell') as HTMLElement | null)?.classList.contains('is-empty-state')).toBe(false);
     expect((document.querySelector('#preview-empty') as HTMLElement | null)?.hidden).toBe(true);
     expect((document.querySelector('#thumbnail-rail') as HTMLElement | null)?.hidden).toBe(false);
     expect((document.querySelector('#stamp-controls') as HTMLElement | null)?.hidden).toBe(false);

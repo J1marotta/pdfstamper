@@ -53,6 +53,7 @@ interface AppState {
 }
 
 interface AppElements {
+  studioShell: HTMLElement;
   topbar: HTMLElement;
   fileInput: HTMLInputElement;
   uploadButton: HTMLButtonElement;
@@ -137,6 +138,7 @@ export class PdfStampStudio {
     this.root = root;
     this.root.innerHTML = shellMarkup();
     this.elements = {
+      studioShell: this.root.querySelector<HTMLElement>('.studio-shell')!,
       topbar: this.root.querySelector<HTMLElement>('#topbar')!,
       fileInput: this.root.querySelector<HTMLInputElement>('#file-input')!,
       uploadButton: this.root.querySelector<HTMLButtonElement>('#upload-button')!,
@@ -947,6 +949,7 @@ export class PdfStampStudio {
 
   private renderChromeVisibility(): void {
     const hasBundle = Boolean(this.state.bundle);
+    this.elements.studioShell.classList.toggle('is-empty-state', !hasBundle);
     this.elements.topbar.hidden = !hasBundle;
     this.elements.thumbnailRail.hidden = !hasBundle;
     this.elements.previewFileMeta.hidden = !hasBundle;
