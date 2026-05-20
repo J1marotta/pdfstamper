@@ -371,13 +371,13 @@ export class PdfStampStudio {
         return;
       }
 
-      if (target.closest('input, button, select, label')) {
-        return;
-      }
-
       const handle = target.closest<HTMLElement>('[data-stamp-handle]')?.dataset.stampHandle as ResizeHandle | undefined;
       const rotateHandle = target.closest<HTMLElement>('[data-stamp-action="rotate-stamp"]');
       const stampCard = target.closest<HTMLElement>('.preview-stamp-object');
+
+      if (!handle && !rotateHandle && target.closest('input, select, textarea, button')) {
+        return;
+      }
 
       if (!rotateHandle && !handle && !stampCard) {
         return;
@@ -659,6 +659,7 @@ export class PdfStampStudio {
     this.stampInteraction = null;
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    this.renderPreviewStamp();
   };
 
   private updatePlacementFromPixels(
@@ -905,7 +906,7 @@ export class PdfStampStudio {
   }
 
   private renderAll(): void {
-    this.renderTopbarVisibility();
+    this.renderChromeVisibility();
     this.renderControlState();
     this.renderStatus();
     this.renderThumbnailRail();
@@ -918,7 +919,7 @@ export class PdfStampStudio {
   }
 
   private renderControlState(): void {
-    this.renderTopbarVisibility();
+    this.renderChromeVisibility();
     this.elements.uploadButton.disabled = this.state.loadingPdf;
     this.elements.addBlankPageButton.disabled = !this.state.bundle || this.state.loadingPdf;
     const currentIndex = this.getCurrentPageIndex();
@@ -932,8 +933,13 @@ export class PdfStampStudio {
     this.elements.status.textContent = this.state.notice.message;
   }
 
-  private renderTopbarVisibility(): void {
-    this.elements.topbar.hidden = !this.state.bundle;
+  private renderChromeVisibility(): void {
+    const hasBundle = Boolean(this.state.bundle);
+    this.elements.topbar.hidden = !hasBundle;
+    this.elements.thumbnailRail.hidden = !hasBundle;
+    this.elements.previewFileMeta.hidden = !hasBundle;
+    this.elements.stampControls.hidden = !hasBundle;
+    this.elements.status.hidden = !hasBundle && this.state.notice.tone === 'neutral';
   }
 
   private renderThumbnailRail(): void {
@@ -1239,6 +1245,17 @@ export class PdfStampStudio {
     const placement = this.state.stamp.placement;
     const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
     const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
+    const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
+    const surfaceCursor =
+      this.stampInteraction?.kind === 'resize' && this.stampInteraction.handle
+        ? cursorForHandle(this.stampInteraction.handle, placement.rotation)
+        : this.stampInteraction?.kind === 'drag'
+          ? 'grabbing'
+          : this.stampInteraction?.kind === 'rotate'
+            ? 'grabbing'
+            : this.state.stampSelected
+              ? 'grab'
+              : 'pointer';
 
     this.elements.previewGuides.hidden = !verticalGuide && !horizontalGuide;
     this.elements.previewGuides.className = `preview-guides${verticalGuide ? ' show-vertical' : ''}${horizontalGuide ? ' show-horizontal' : ''}`;
@@ -1246,10 +1263,10 @@ export class PdfStampStudio {
     this.elements.previewStamp.hidden = false;
     this.updateContainerMarkup(this.elements.previewStamp, `
       <div
-        class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}"
+        class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}${interactionClass}"
         style="left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
       >
-        <div class="preview-stamp-body">
+        <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
             ${showTable ? renderStampTable(rows, { editable: this.state.stampSelected }) : ''}
             ${
@@ -1259,7 +1276,7 @@ export class PdfStampStudio {
             }
           </div>
         </div>
-        ${this.state.stampSelected ? renderStampHandles() : ''}
+        ${this.state.stampSelected ? renderStampHandles(placement.rotation) : ''}
       </div>
     `);
   }
@@ -1624,12 +1641,12 @@ function renderReadonlyStampRow(row: ReturnType<typeof buildStampRows>[number]):
   `;
 }
 
-function renderStampHandles(): string {
+function renderStampHandles(rotation: number): string {
   return `
     <div class="stamp-selection">
       <button type="button" class="stamp-rotate-handle" data-stamp-action="rotate-stamp" aria-label="Rotate stamp"></button>
       ${['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
-        .map((handle) => `<button type="button" class="stamp-handle is-${handle}" data-stamp-handle="${handle}" aria-label="Resize stamp ${handle}"></button>`)
+        .map((handle) => `<button type="button" class="stamp-handle is-${handle}" data-stamp-handle="${handle}" aria-label="Resize stamp ${handle}" style="cursor:${cursorForHandle(handle as ResizeHandle, rotation)};"></button>`)
         .join('')}
     </div>
   `;
@@ -1831,4 +1848,21 @@ function clampValue(value: number, min: number, max: number): number {
 function normalizeDegrees(value: number): number {
   const normalized = value % 360;
   return normalized < 0 ? normalized + 360 : normalized;
+}
+
+function cursorForHandle(handle: ResizeHandle, rotation: number): string {
+  const cursorCycle = ['ns-resize', 'nesw-resize', 'ew-resize', 'nwse-resize'] as const;
+  const baseIndexByHandle: Record<ResizeHandle, number> = {
+    n: 0,
+    s: 0,
+    ne: 1,
+    sw: 1,
+    e: 2,
+    w: 2,
+    nw: 3,
+    se: 3,
+  };
+
+  const rotationSteps = Math.round(normalizeDegrees(rotation) / 45) % cursorCycle.length;
+  return cursorCycle[(baseIndexByHandle[handle] + rotationSteps) % cursorCycle.length];
 }

@@ -18,6 +18,10 @@ describe('PdfStampStudio shell', () => {
     const topbar = document.querySelector('#topbar') as HTMLElement | null;
     expect(topbar).not.toBeNull();
     expect(topbar?.hidden).toBe(true);
+    expect((document.querySelector('#thumbnail-rail') as HTMLElement | null)?.hidden).toBe(true);
+    expect((document.querySelector('#stamp-controls') as HTMLElement | null)?.hidden).toBe(true);
+    expect((document.querySelector('#preview-file-meta') as HTMLElement | null)?.hidden).toBe(true);
+    expect((document.querySelector('#status') as HTMLElement | null)?.hidden).toBe(true);
     expect(document.querySelector('#upload-button')).not.toBeNull();
     expect(document.querySelector('#preview-frame')).not.toBeNull();
     expect(document.querySelector('#thumbnail-rail')).not.toBeNull();
@@ -95,19 +99,126 @@ describe('PdfStampStudio shell', () => {
     const internalStudio = studio as unknown as {
       state: {
         bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
       };
       renderControlState: () => void;
+      renderPreviewMeta: () => void;
     };
 
     internalStudio.state.bundle = {
       fileName: 'resume.pdf',
       pageCount: 1,
     };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
     internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
 
     const topbar = document.querySelector('#topbar') as HTMLElement | null;
     expect(topbar).not.toBeNull();
     expect(topbar?.hidden).toBe(false);
+    expect((document.querySelector('#preview-empty') as HTMLElement | null)?.hidden).toBe(true);
+    expect((document.querySelector('#thumbnail-rail') as HTMLElement | null)?.hidden).toBe(false);
+    expect((document.querySelector('#stamp-controls') as HTMLElement | null)?.hidden).toBe(false);
+    expect((document.querySelector('#preview-file-meta') as HTMLElement | null)?.hidden).toBe(false);
+  });
+
+  it('starts a resize interaction from a handle and exposes the matching cursor', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      stampInteraction: { kind: string; handle?: string } | null;
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    previewCanvas!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 800,
+        right: 600,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const stampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(stampBody).not.toBeNull();
+    Object.defineProperty(stampBody!, 'offsetWidth', { configurable: true, value: 300 });
+    Object.defineProperty(stampBody!, 'offsetHeight', { configurable: true, value: 180 });
+
+    const eastHandle = document.querySelector('.stamp-handle.is-e') as HTMLElement | null;
+    expect(eastHandle).not.toBeNull();
+    expect(eastHandle?.getAttribute('style')).toContain('cursor:ew-resize');
+
+    const pointerDown = Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 450,
+      clientY: 300,
+    });
+    eastHandle!.dispatchEvent(pointerDown);
+
+    expect(internalStudio.stampInteraction).not.toBeNull();
+    expect(internalStudio.stampInteraction?.kind).toBe('resize');
+    expect(internalStudio.stampInteraction?.handle).toBe('e');
   });
 
   it('clears a stale download link after direct stamp editing', () => {
