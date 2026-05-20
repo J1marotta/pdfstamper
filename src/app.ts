@@ -929,6 +929,7 @@ export class PdfStampStudio {
   }
 
   private renderStatus(): void {
+    this.renderChromeVisibility();
     this.elements.status.className = `status is-${this.state.notice.tone}`;
     this.elements.status.textContent = this.state.notice.message;
   }
@@ -1174,6 +1175,7 @@ export class PdfStampStudio {
       this.elements.previewGuides.hidden = true;
       this.elements.previewHint.hidden = true;
       this.elements.previewFrame.classList.add('is-empty');
+      this.clearPreviewOverlayFrame();
       return;
     }
 
@@ -1212,6 +1214,7 @@ export class PdfStampStudio {
       this.elements.previewCanvas.hidden = false;
       this.elements.previewHint.hidden = true;
       this.elements.previewFrame.classList.add('has-preview');
+      this.syncPreviewOverlayFrame();
       this.renderPreviewStamp();
     } catch (error) {
       console.error(error);
@@ -1222,6 +1225,7 @@ export class PdfStampStudio {
       this.elements.previewFrame.classList.remove('has-preview');
       this.showPreviewHint('Preview failed for this page');
       this.elements.previewStamp.hidden = true;
+      this.clearPreviewOverlayFrame();
     } finally {
       if (renderToken === this.previewToken) {
         this.elements.previewFrame.classList.remove('is-loading');
@@ -1259,6 +1263,7 @@ export class PdfStampStudio {
 
     this.elements.previewGuides.hidden = !verticalGuide && !horizontalGuide;
     this.elements.previewGuides.className = `preview-guides${verticalGuide ? ' show-vertical' : ''}${horizontalGuide ? ' show-horizontal' : ''}`;
+    this.syncPreviewOverlayFrame();
 
     this.elements.previewStamp.hidden = false;
     this.updateContainerMarkup(this.elements.previewStamp, `
@@ -1283,6 +1288,46 @@ export class PdfStampStudio {
 
   private renderAdvancedSheetVisibility(): void {
     this.elements.advancedSheet.hidden = !this.state.advancedOpen;
+  }
+
+  private syncPreviewOverlayFrame(): void {
+    if (this.elements.previewCanvas.hidden) {
+      this.clearPreviewOverlayFrame();
+      return;
+    }
+
+    const left = this.elements.previewCanvas.offsetLeft;
+    const top = this.elements.previewCanvas.offsetTop;
+    const width = this.elements.previewCanvas.clientWidth;
+    const height = this.elements.previewCanvas.clientHeight;
+
+    if (width <= 0 || height <= 0) {
+      return;
+    }
+
+    const style = {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${width}px`,
+      height: `${height}px`,
+      inset: 'auto',
+    };
+
+    Object.assign(this.elements.previewStamp.style, style);
+    Object.assign(this.elements.previewGuides.style, style);
+  }
+
+  private clearPreviewOverlayFrame(): void {
+    this.elements.previewStamp.style.left = '';
+    this.elements.previewStamp.style.top = '';
+    this.elements.previewStamp.style.width = '';
+    this.elements.previewStamp.style.height = '';
+    this.elements.previewStamp.style.inset = '';
+    this.elements.previewGuides.style.left = '';
+    this.elements.previewGuides.style.top = '';
+    this.elements.previewGuides.style.width = '';
+    this.elements.previewGuides.style.height = '';
+    this.elements.previewGuides.style.inset = '';
   }
 
   private setNotice(message: string, tone: NoticeState['tone']): void {

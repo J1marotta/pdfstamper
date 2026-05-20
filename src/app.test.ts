@@ -221,6 +221,103 @@ describe('PdfStampStudio shell', () => {
     expect(internalStudio.stampInteraction?.handle).toBe('e');
   });
 
+  it('reveals status for pre-upload errors instead of leaving it hidden', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        notice: { tone: 'neutral' | 'busy' | 'success' | 'error'; message: string };
+      };
+      renderStatus: () => void;
+    };
+
+    const status = document.querySelector('#status') as HTMLElement | null;
+    expect(status).not.toBeNull();
+    expect(status?.hidden).toBe(true);
+
+    internalStudio.state.notice = {
+      tone: 'error',
+      message: 'Use a PDF file for this workflow.',
+    };
+    internalStudio.renderStatus();
+
+    expect(status?.hidden).toBe(false);
+    expect(status?.textContent).toContain('Use a PDF file for this workflow.');
+  });
+
+  it('locks the visible stamp overlay to the rendered canvas bounds', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          payee: string;
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      payee: 'Acme Pty Ltd',
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    Object.defineProperty(previewCanvas!, 'offsetLeft', { configurable: true, value: 120 });
+    Object.defineProperty(previewCanvas!, 'offsetTop', { configurable: true, value: 48 });
+    Object.defineProperty(previewCanvas!, 'clientWidth', { configurable: true, value: 540 });
+    Object.defineProperty(previewCanvas!, 'clientHeight', { configurable: true, value: 760 });
+
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewStamp = document.querySelector('#preview-stamp') as HTMLElement | null;
+    const previewGuides = document.querySelector('#preview-guides') as HTMLElement | null;
+    expect(previewStamp?.style.left).toBe('120px');
+    expect(previewStamp?.style.top).toBe('48px');
+    expect(previewStamp?.style.width).toBe('540px');
+    expect(previewStamp?.style.height).toBe('760px');
+    expect(previewGuides?.style.left).toBe('120px');
+    expect(previewGuides?.style.width).toBe('540px');
+  });
+
   it('clears a stale download link after direct stamp editing', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
