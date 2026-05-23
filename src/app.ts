@@ -58,6 +58,7 @@ interface AppElements {
   fileInput: HTMLInputElement;
   uploadButton: HTMLButtonElement;
   addBlankPageButton: HTMLButtonElement;
+  deletePageButton: HTMLButtonElement;
   exportActions: HTMLElement;
   status: HTMLElement;
   stampControls: HTMLElement;
@@ -143,6 +144,7 @@ export class PdfStampStudio {
       fileInput: this.root.querySelector<HTMLInputElement>('#file-input')!,
       uploadButton: this.root.querySelector<HTMLButtonElement>('#upload-button')!,
       addBlankPageButton: this.root.querySelector<HTMLButtonElement>('#add-blank-page-button')!,
+      deletePageButton: this.root.querySelector<HTMLButtonElement>('#delete-page-button')!,
       exportActions: this.root.querySelector<HTMLElement>('#export-actions')!,
       status: this.root.querySelector<HTMLElement>('#status')!,
       stampControls: this.root.querySelector<HTMLElement>('#stamp-controls')!,
@@ -217,6 +219,11 @@ export class PdfStampStudio {
         return;
       }
 
+      if (action === 'delete-page') {
+        this.deleteCurrentPage();
+        return;
+      }
+
       if (action === 'export-pdf') {
         void this.handleExport();
         return;
@@ -239,6 +246,11 @@ export class PdfStampStudio {
         this.clearStampImage();
         this.renderStampControls();
         this.renderPreviewStamp();
+        return;
+      }
+
+      if (action === 'delete-stamp') {
+        this.deleteStamp();
       }
     });
 
@@ -888,6 +900,73 @@ export class PdfStampStudio {
     this.renderStatus();
   }
 
+  private deleteCurrentPage(): void {
+    const currentIndex = this.getCurrentPageIndex();
+    if (currentIndex === -1) {
+      return;
+    }
+
+    if (this.state.pages.length <= 1) {
+      this.setNotice('Add another page before removing the last remaining one.', 'error');
+      this.renderStatus();
+      return;
+    }
+
+    const pageToRemove = this.state.pages[currentIndex]!;
+    const remainingPages = this.state.pages.filter((_, index) => index !== currentIndex);
+    const nextIndex = Math.min(currentIndex, remainingPages.length - 1);
+    const removedLabel = pageToRemove.kind === 'blank' ? 'Blank page' : `Page ${pageToRemove.pageNumber}`;
+    const removedStamp = this.state.stamp.placement.pageId === pageToRemove.id;
+
+    this.state.pages = remainingPages;
+    this.state.previewPageId = remainingPages[nextIndex]?.id ?? null;
+    this.state.stampSelected = false;
+    if (removedStamp) {
+      this.state.stamp = {
+        ...this.state.stamp,
+        placement: {
+          ...this.state.stamp.placement,
+          pageId: null,
+        },
+      };
+    }
+    this.invalidateLastExport();
+    this.renderControlState();
+    this.renderThumbnailRail();
+    this.renderStampControls();
+    this.renderPreviewMeta();
+    void this.renderPreview();
+    this.setNotice(
+      removedStamp
+        ? `${removedLabel} removed. The stamp was removed with it.`
+        : `${removedLabel} removed.`,
+      'neutral',
+    );
+    this.renderStatus();
+  }
+
+  private deleteStamp(): void {
+    if (!isStampPlaced(this.state.stamp)) {
+      return;
+    }
+
+    this.state.stamp = {
+      ...this.state.stamp,
+      placement: {
+        ...this.state.stamp.placement,
+        pageId: null,
+      },
+    };
+    this.state.stampSelected = false;
+    this.invalidateLastExport();
+    this.renderControlState();
+    this.renderThumbnailRail();
+    this.renderStampControls();
+    this.renderPreviewMeta();
+    this.setNotice('Stamp removed. Click anywhere on the page to place it again.', 'neutral');
+    this.renderStatus();
+  }
+
   private reapplyProfile(options: ReapplyRenderOptions = {}): void {
     if (!this.state.bundle) {
       return;
@@ -931,6 +1010,8 @@ export class PdfStampStudio {
     this.renderChromeVisibility();
     this.elements.uploadButton.disabled = this.state.loadingPdf;
     this.elements.addBlankPageButton.disabled = !this.state.bundle || this.state.loadingPdf;
+    this.elements.deletePageButton.disabled =
+      !this.state.bundle || this.state.loadingPdf || this.state.pages.length <= 1 || this.getCurrentPageIndex() === -1;
     const currentIndex = this.getCurrentPageIndex();
     this.elements.prevPageButton.disabled = currentIndex <= 0;
     this.elements.nextPageButton.disabled = currentIndex === -1 || currentIndex >= this.state.pages.length - 1;
@@ -1138,6 +1219,11 @@ export class PdfStampStudio {
         </label>
         <div class="inspector-actions">
           <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
+          ${
+            isStampPlaced(this.state.stamp)
+              ? '<button type="button" class="ghost-button" data-action="delete-stamp">Delete stamp</button>'
+              : ''
+          }
           ${
             hasImage
               ? '<button type="button" class="ghost-button" data-action="clear-stamp-image">Remove image</button>'
@@ -1466,6 +1552,7 @@ function shellMarkup(): string {
         <div class="topbar-actions">
           <button id="upload-button" class="ghost-button" type="button" data-action="choose-file">Upload PDF</button>
           <button id="add-blank-page-button" class="ghost-button" type="button" data-action="add-blank-page">Add blank page</button>
+          <button id="delete-page-button" class="ghost-button" type="button" data-action="delete-page">Delete page</button>
           <div class="topbar-page-nav">
             <button id="prev-page-button" class="nav-button" type="button">Prev</button>
             <span id="preview-page-label">No page</span>

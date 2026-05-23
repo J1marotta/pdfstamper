@@ -133,6 +133,7 @@ describe('PdfStampStudio shell', () => {
     expect((document.querySelector('#thumbnail-rail') as HTMLElement | null)?.hidden).toBe(false);
     expect((document.querySelector('#stamp-controls') as HTMLElement | null)?.hidden).toBe(false);
     expect((document.querySelector('#preview-file-meta') as HTMLElement | null)?.hidden).toBe(false);
+    expect((document.querySelector('#delete-page-button') as HTMLButtonElement | null)?.disabled).toBe(true);
   });
 
   it('updates page navigation button states when the active page changes', () => {
@@ -479,6 +480,154 @@ describe('PdfStampStudio shell', () => {
 
     expect(status?.hidden).toBe(false);
     expect(status?.textContent).toContain('Use a PDF file for this workflow.');
+  });
+
+  it('deletes the active page, advances preview, and clears the stamp if it was on that page', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderThumbnailRail: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+      renderPreview: () => Promise<void>;
+    };
+
+    internalStudio.renderPreview = vi.fn(async () => undefined);
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 2,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+      {
+        id: 'pdf-2',
+        kind: 'pdf',
+        pageNumber: 2,
+        width: 595,
+        height: 842,
+        label: 'Page 2',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderThumbnailRail();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const deleteButton = document.querySelector('#delete-page-button') as HTMLButtonElement | null;
+    const status = document.querySelector('#status') as HTMLElement | null;
+    expect(deleteButton).not.toBeNull();
+    expect(deleteButton?.disabled).toBe(false);
+
+    deleteButton!.click();
+
+    expect(internalStudio.state.pages.map((page) => page.id)).toEqual(['pdf-2']);
+    expect(internalStudio.state.previewPageId).toBe('pdf-2');
+    expect(internalStudio.state.stamp.placement.pageId).toBeNull();
+    expect(status?.textContent).toContain('The stamp was removed with it.');
+    expect(deleteButton?.disabled).toBe(true);
+  });
+
+  it('deletes the placed stamp from the inspector and clears the page marker', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderThumbnailRail: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.5,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderThumbnailRail();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const deleteStampButton = document.querySelector('[data-action="delete-stamp"]') as HTMLButtonElement | null;
+    const previewStamp = document.querySelector('#preview-stamp') as HTMLElement | null;
+    expect(deleteStampButton).not.toBeNull();
+    expect(previewStamp?.hidden).toBe(false);
+    expect(document.querySelector('.thumb-stamp-flag')).not.toBeNull();
+
+    deleteStampButton!.click();
+
+    expect(internalStudio.state.stamp.placement.pageId).toBeNull();
+    expect(previewStamp?.hidden).toBe(true);
+    expect(document.querySelector('.thumb-stamp-flag')).toBeNull();
+    expect(document.querySelector('[data-action="delete-stamp"]')).toBeNull();
   });
 
   it('shows a clear error when a non-PDF file is dropped onto the preview stage', () => {

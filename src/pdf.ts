@@ -111,7 +111,6 @@ export async function exportFilledPdf(
   const form = document.getForm();
   const regularFont = await document.embedFont(StandardFonts.Helvetica);
   const boldFont = await document.embedFont(StandardFonts.HelveticaBold);
-  const sourcePages = [...document.getPages()];
 
   applyFieldValues(form, fields);
 
@@ -131,19 +130,29 @@ export async function exportFilledPdf(
 
   const embeddedImage = await embedStampImage(document, stamp);
   const pageMap = new Map<string, PDFPage>();
-  let documentIndex = 0;
+  const keptSourcePageNumbers = new Set(
+    pages
+      .filter((page): page is Extract<DocumentPageModel, { kind: 'pdf' }> => page.kind === 'pdf')
+      .map((page) => page.pageNumber),
+  );
 
-  pages.forEach((pageModel) => {
-    if (pageModel.kind === 'blank') {
-      const blankPage = document.insertPage(documentIndex, [pageModel.width, pageModel.height]);
-      pageMap.set(pageModel.id, blankPage);
-    } else {
-      const sourcePage = sourcePages[pageModel.pageNumber - 1];
-      if (sourcePage) {
-        pageMap.set(pageModel.id, sourcePage);
-      }
+  for (let pageIndex = document.getPageCount() - 1; pageIndex >= 0; pageIndex -= 1) {
+    if (!keptSourcePageNumbers.has(pageIndex + 1)) {
+      document.removePage(pageIndex);
     }
-    documentIndex += 1;
+  }
+
+  pages.forEach((pageModel, targetIndex) => {
+    if (pageModel.kind === 'blank') {
+      const blankPage = document.insertPage(targetIndex, [pageModel.width, pageModel.height]);
+      pageMap.set(pageModel.id, blankPage);
+      return;
+    }
+
+    const keptPage = document.getPage(targetIndex);
+    if (keptPage) {
+      pageMap.set(pageModel.id, keptPage);
+    }
   });
 
   if (isStampPlaced(stamp)) {
