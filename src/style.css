@@ -467,6 +467,7 @@ button {
 }
 
 .preview-stamp-card {
+  --stamp-preview-scale: 1;
   border: 1px solid rgba(169, 49, 32, 0.24);
   background: rgba(255, 252, 248, 0.94);
   box-shadow: 0 24px 44px rgba(72, 48, 28, 0.1);
@@ -481,12 +482,13 @@ button {
 
 .stamp-table-preview {
   width: 100%;
+  font-size: calc(16px * var(--stamp-preview-scale));
 }
 
 .stamp-table-row {
   display: grid;
-  grid-template-columns: minmax(112px, 34%) minmax(0, 1fr);
-  min-height: 40px;
+  grid-template-columns: minmax(7em, 34%) minmax(0, 1fr);
+  min-height: 2.5em;
   border-bottom: 1px solid rgba(169, 49, 32, 0.22);
 }
 
@@ -497,10 +499,10 @@ button {
 .stamp-table-label {
   display: grid;
   align-content: center;
-  padding: 10px 10px 10px 12px;
+  padding: 0.82em 0.82em 0.82em 1em;
   border-right: 1px solid rgba(169, 49, 32, 0.22);
   color: var(--stamp);
-  font-size: 0.78rem;
+  font-size: 0.78em;
   font-weight: 700;
   letter-spacing: 0.02em;
 }
@@ -509,19 +511,19 @@ button {
 .stamp-table-input-wrap {
   display: grid;
   align-content: center;
-  padding: 8px 12px;
+  padding: 0.66em 1em;
   min-width: 0;
 }
 
 .stamp-table-value {
   color: var(--ink);
-  font-size: clamp(0.86rem, 1.2vw, 1rem);
+  font-size: 1em;
   line-height: 1.35;
   word-break: break-word;
 }
 
 .stamp-table-value.is-emphasis {
-  font-size: clamp(1rem, 1.65vw, 1.42rem);
+  font-size: 1.26em;
   font-weight: 700;
 }
 
@@ -531,13 +533,13 @@ button {
   border: none;
   background: transparent;
   color: var(--ink);
-  font-size: clamp(0.86rem, 1.2vw, 1rem);
+  font-size: 1em;
   line-height: 1.35;
   outline: none;
 }
 
 .stamp-table-input.is-emphasis {
-  font-size: clamp(1rem, 1.65vw, 1.42rem);
+  font-size: 1.26em;
   font-weight: 700;
 }
 
@@ -552,7 +554,7 @@ button {
 }
 
 .preview-stamp-image {
-  padding: 14px;
+  padding: calc(14px * var(--stamp-preview-scale));
 }
 
 .stamp-selection {

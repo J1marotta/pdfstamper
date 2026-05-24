@@ -112,7 +112,8 @@ const EMPTY_STATS: FillStats = {
   matchedCount: 0,
 };
 
-const STAMP_MIN_WIDTH_RATIO = 0.2;
+const DEFAULT_STAMP_WIDTH_RATIO = 0.52;
+const STAMP_MIN_WIDTH_RATIO = DEFAULT_STAMP_WIDTH_RATIO * 0.4;
 const STAMP_MAX_WIDTH_RATIO = 0.88;
 const STAMP_SNAP_THRESHOLD = 0.02;
 
@@ -1344,6 +1345,7 @@ export class PdfStampStudio {
     const showImage = shouldShowStampImage(this.state.stamp, hasImage);
     const rows = buildStampRows(this.state.stamp);
     const placement = this.state.stamp.placement;
+    const previewScale = clampValue(placement.width / DEFAULT_STAMP_WIDTH_RATIO, 0.4, 1.8);
     const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
     const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
     const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
@@ -1364,7 +1366,7 @@ export class PdfStampStudio {
     this.updateContainerMarkup(this.elements.previewStamp, `
       <div
         class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}${interactionClass}"
-        style="left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
+        style="--stamp-preview-scale:${previewScale}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
       >
         <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
@@ -1645,7 +1647,7 @@ function defaultStampSettings(): StampSettings {
       pageId: null,
       x: 0.5,
       y: 0.72,
-      width: 0.52,
+      width: DEFAULT_STAMP_WIDTH_RATIO,
       rotation: 0,
     },
     flatten: false,

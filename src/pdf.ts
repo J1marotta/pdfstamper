@@ -38,13 +38,14 @@ const STAMP_RED = rgb(0.66, 0.13, 0.1);
 const INK = rgb(0.16, 0.14, 0.15);
 
 export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
-  const sourceBytes = new Uint8Array(await file.arrayBuffer());
+  const rawBuffer = await file.arrayBuffer();
+  const { sourceBytes, editableBytes, previewBytes } = clonePdfBytesForWorkflows(rawBuffer);
   const [editableDocument, previewDocument] = await Promise.all([
-    PDFDocument.load(sourceBytes, {
+    PDFDocument.load(editableBytes, {
       ignoreEncryption: true,
       updateMetadata: false,
     }),
-    getDocument({ data: sourceBytes }).promise,
+    getDocument({ data: previewBytes }).promise,
   ]);
 
   const fields = extractFields(editableDocument);
@@ -63,6 +64,19 @@ export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
     pageSizes,
     textDigest,
     fields,
+  };
+}
+
+export function clonePdfBytesForWorkflows(rawBuffer: ArrayBuffer): {
+  sourceBytes: Uint8Array;
+  editableBytes: Uint8Array;
+  previewBytes: Uint8Array;
+} {
+  const rawBytes = new Uint8Array(rawBuffer);
+  return {
+    sourceBytes: new Uint8Array(rawBytes),
+    editableBytes: new Uint8Array(rawBytes),
+    previewBytes: new Uint8Array(rawBytes),
   };
 }
 

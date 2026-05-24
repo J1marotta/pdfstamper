@@ -455,6 +455,63 @@ describe('PdfStampStudio shell', () => {
     window.dispatchEvent(new Event('pointerup'));
   });
 
+  it('scales preview text down with the stamp and preserves the smaller minimum size', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.208,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
+    expect(stampObject).not.toBeNull();
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-preview-scale:0.4');
+    expect(stampObject?.getAttribute('style')).toContain('width:20.8%');
+  });
+
   it('reveals status for pre-upload errors instead of leaving it hidden', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');

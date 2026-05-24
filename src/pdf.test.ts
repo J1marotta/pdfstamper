@@ -46,6 +46,19 @@ function makeStamp(overrides: Partial<StampSettings> = {}): StampSettings {
 }
 
 describe('exportFilledPdf', () => {
+  it('keeps export bytes independent from preview bytes', async () => {
+    const { clonePdfBytesForWorkflows } = await import('./pdf');
+    const rawBytes = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 55]);
+    const { sourceBytes, editableBytes, previewBytes } = clonePdfBytesForWorkflows(rawBytes.buffer);
+
+    previewBytes.fill(0);
+    editableBytes[1] = 0;
+
+    expect(Array.from(sourceBytes)).toEqual(Array.from(rawBytes));
+    expect(Array.from(editableBytes)).not.toEqual(Array.from(sourceBytes));
+    expect(Array.from(previewBytes)).not.toEqual(Array.from(sourceBytes));
+  });
+
   it('returns a valid PDF blob header', async () => {
     const { exportFilledPdf } = await import('./pdf');
     const source = await PDFDocument.create();
