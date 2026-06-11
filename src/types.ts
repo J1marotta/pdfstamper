@@ -69,6 +69,7 @@ export interface StampPlacement {
   pageId: string | null;
   x: number;
   y: number;
+  /** Absolute stamp width in PDF points, independent of the current page width. */
   width: number;
   rotation: number;
 }

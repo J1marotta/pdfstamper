@@ -463,18 +463,20 @@ button {
 
 .preview-stamp-body {
   position: relative;
+  width: 100%;
+  height: 100%;
   user-select: none;
 }
 
 .preview-stamp-card {
-  --stamp-preview-scale: 1;
-  --stamp-content-width: 100;
-  width: calc(var(--stamp-content-width) * 1%);
-  zoom: var(--stamp-preview-scale);
+  --stamp-scale: 1;
+  width: 460px;
   border: 1px solid rgba(169, 49, 32, 0.24);
   background: rgba(255, 252, 248, 0.94);
   box-shadow: 0 24px 44px rgba(72, 48, 28, 0.1);
   border-radius: 6px;
+  transform: scale(var(--stamp-scale));
+  transform-origin: top left;
 }
 
 .preview-stamp-object.is-selected .preview-stamp-card {
@@ -490,8 +492,8 @@ button {
 
 .stamp-table-row {
   display: grid;
-  grid-template-columns: minmax(7em, 34%) minmax(0, 1fr);
-  min-height: 2.16em;
+  grid-template-columns: 156px minmax(0, 1fr);
+  height: calc(var(--stamp-row-height, 32) * 1px);
   border-bottom: 1px solid rgba(169, 49, 32, 0.22);
 }
 
@@ -522,7 +524,9 @@ button {
   color: var(--ink);
   font-size: 1em;
   line-height: 1.35;
-  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stamp-table-value.is-emphasis {
@@ -539,6 +543,7 @@ button {
   font-size: 1em;
   line-height: 1.35;
   outline: none;
+  text-overflow: ellipsis;
 }
 
 .stamp-table-input.is-emphasis {
@@ -553,6 +558,7 @@ button {
 .stamp-preview-image {
   display: block;
   max-width: 100%;
+  max-height: 160px;
   margin: 0 auto;
 }
 

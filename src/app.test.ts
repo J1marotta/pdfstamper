@@ -76,7 +76,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -236,7 +236,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -324,7 +324,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.5,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -405,7 +405,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.5,
-        width: 0.5,
+        width: 300,
         rotation: 90,
       },
     };
@@ -450,7 +450,7 @@ describe('PdfStampStudio shell', () => {
     });
     window.dispatchEvent(pointerMove);
 
-    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(0.5);
+    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
 
     window.dispatchEvent(new Event('pointerup'));
   });
@@ -498,7 +498,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.5,
-        width: 0.52,
+        width: 300,
         rotation: 0,
       },
     };
@@ -539,7 +539,7 @@ describe('PdfStampStudio shell', () => {
       clientY: 400,
     }));
 
-    expect(internalStudio.state.stamp.placement.width).toBeCloseTo(0.0832);
+    expect(internalStudio.state.stamp.placement.width).toBeCloseTo(12);
 
     window.dispatchEvent(new Event('pointerup'));
   });
@@ -587,7 +587,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.0832,
+        width: 12,
         rotation: 0,
       },
     };
@@ -597,9 +597,8 @@ describe('PdfStampStudio shell', () => {
 
     const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
     expect(stampObject).not.toBeNull();
-    expect(stampObject?.getAttribute('style')).toContain('--stamp-preview-scale:0.16');
-    expect(stampObject?.getAttribute('style')).toContain('--stamp-content-width:625');
-    expect(stampObject?.getAttribute('style')).toContain('width:8.32%');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale:0.0261');
+    expect(stampObject?.getAttribute('style')).toContain('width:12px');
   });
 
   it('switches image uploads into a visible stamp mode and shows the selected filename', async () => {
@@ -651,7 +650,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.52,
+        width: 300,
         rotation: 0,
       },
     };
@@ -751,7 +750,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -820,7 +819,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -911,7 +910,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };
@@ -987,7 +986,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.5,
+        width: 300,
         rotation: 0,
       },
     };

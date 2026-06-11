@@ -349,10 +349,7 @@ function drawStamp(
   const pageWidth = page.getWidth();
   const pageHeight = page.getHeight();
   const margin = 18;
-  const maxWidth = Math.max(
-    MIN_STAMP_EXPORT_WIDTH,
-    Math.min(pageWidth - margin * 2, pageWidth * stamp.placement.width),
-  );
+  const maxWidth = exportStampWidthPoints(stamp.placement.width, pageWidth);
   const scale = maxWidth / 460;
   const showTable = shouldShowStampTable(stamp, Boolean(embeddedImage));
   const rows = showTable ? buildPdfStampRows(stamp) : [];
@@ -373,11 +370,12 @@ function drawStamp(
   const gap = tableHeight > 0 && imageHeight > 0 ? 10 * scale : 0;
   const blockWidth = Math.max(tableHeight > 0 ? maxWidth : 0, imageWidth);
   const blockHeight = tableHeight + gap + imageHeight;
-  const centerX = clampValue(pageWidth * stamp.placement.x, blockWidth / 2 + margin, pageWidth - blockWidth / 2 - margin);
-  const centerY = clampValue(
+  const centerX = clampPdfCenter(pageWidth * stamp.placement.x, blockWidth / 2 + margin, pageWidth - blockWidth / 2 - margin, pageWidth);
+  const centerY = clampPdfCenter(
     pageHeight * (1 - stamp.placement.y),
     blockHeight / 2 + margin,
     pageHeight - blockHeight / 2 - margin,
+    pageHeight,
   );
   const x = centerX - blockWidth / 2;
   const y = centerY - blockHeight / 2;
@@ -409,6 +407,22 @@ function drawStamp(
     const fallbackRows = buildPdfStampRows(stamp);
     drawStampTable(page, x, y, maxWidth, fallbackRows, boldFont, regularFont, scale, centerX, centerY, rotation);
   }
+}
+
+function exportStampWidthPoints(width: number, pageWidth: number): number {
+  if (width > 0 && width <= 2) {
+    return Math.max(MIN_STAMP_EXPORT_WIDTH, width * pageWidth);
+  }
+
+  return Math.max(MIN_STAMP_EXPORT_WIDTH, width);
+}
+
+function clampPdfCenter(value: number, min: number, max: number, extent: number): number {
+  if (min > max) {
+    return clampValue(value, 0, extent);
+  }
+
+  return clampValue(value, min, max);
 }
 
 function buildPdfStampRows(stamp: StampSettings): Array<{

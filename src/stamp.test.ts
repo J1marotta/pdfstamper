@@ -26,7 +26,7 @@ function makeStamp(overrides: Partial<StampSettings> = {}): StampSettings {
       pageId: null,
       x: 0.5,
       y: 0.7,
-      width: 0.52,
+      width: 300,
       rotation: 0,
     },
     flatten: false,
@@ -109,7 +109,7 @@ describe('stamp helpers', () => {
         pageId: 'blank-1',
         x: 0.44,
         y: 0.68,
-        width: 0.42,
+        width: 260,
         rotation: 18,
       },
     });
