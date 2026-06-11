@@ -1,3 +1,6 @@
+// @ts-expect-error Vitest runs this file in Node; the app tsconfig omits Node types.
+import { readFileSync } from 'node:fs';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PdfStampStudio } from './app';
@@ -28,6 +31,13 @@ describe('PdfStampStudio shell', () => {
     expect(document.querySelector('#thumbnail-rail')).not.toBeNull();
     expect(document.querySelector('#stamp-controls')).not.toBeNull();
     expect(document.querySelector('#advanced-sheet')).not.toBeNull();
+  });
+
+  it('lets the stamp card inherit the resize scale from the selection object', () => {
+    const styleCss = readFileSync('src/style.css', 'utf8');
+
+    expect(styleCss).toMatch(/\.preview-stamp-object\s*{[^}]*--stamp-scale: 1;/s);
+    expect(styleCss).not.toMatch(/\.preview-stamp-card\s*{[^}]*--stamp-scale:/s);
   });
 
   it('shows the placed stamp overlay on the active page', () => {

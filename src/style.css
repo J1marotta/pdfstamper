@@ -456,6 +456,7 @@ button {
 }
 
 .preview-stamp-object {
+  --stamp-scale: 1;
   position: absolute;
   transform-origin: center;
   pointer-events: auto;
@@ -469,7 +470,6 @@ button {
 }
 
 .preview-stamp-card {
-  --stamp-scale: 1;
   width: 460px;
   border: 1px solid rgba(169, 49, 32, 0.24);
   background: rgba(255, 252, 248, 0.94);
