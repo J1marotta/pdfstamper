@@ -509,6 +509,7 @@ describe('PdfStampStudio shell', () => {
     const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
     expect(stampObject).not.toBeNull();
     expect(stampObject?.getAttribute('style')).toContain('--stamp-preview-scale:0.16');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-spacing-scale:0.55');
     expect(stampObject?.getAttribute('style')).toContain('width:8.32%');
   });
 

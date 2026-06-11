@@ -468,6 +468,7 @@ button {
 
 .preview-stamp-card {
   --stamp-preview-scale: 1;
+  --stamp-spacing-scale: 1;
   border: 1px solid rgba(169, 49, 32, 0.24);
   background: rgba(255, 252, 248, 0.94);
   box-shadow: 0 24px 44px rgba(72, 48, 28, 0.1);
@@ -488,7 +489,7 @@ button {
 .stamp-table-row {
   display: grid;
   grid-template-columns: minmax(7em, 34%) minmax(0, 1fr);
-  min-height: 2.5em;
+  min-height: calc(2.16em * var(--stamp-spacing-scale));
   border-bottom: 1px solid rgba(169, 49, 32, 0.22);
 }
 
@@ -499,7 +500,11 @@ button {
 .stamp-table-label {
   display: grid;
   align-content: center;
-  padding: 0.82em 0.82em 0.82em 1em;
+  padding:
+    calc(0.66em * var(--stamp-spacing-scale))
+    calc(0.7em * var(--stamp-spacing-scale))
+    calc(0.66em * var(--stamp-spacing-scale))
+    calc(0.86em * var(--stamp-spacing-scale));
   border-right: 1px solid rgba(169, 49, 32, 0.22);
   color: var(--stamp);
   font-size: 0.78em;
@@ -511,7 +516,9 @@ button {
 .stamp-table-input-wrap {
   display: grid;
   align-content: center;
-  padding: 0.66em 1em;
+  padding:
+    calc(0.54em * var(--stamp-spacing-scale))
+    calc(0.82em * var(--stamp-spacing-scale));
   min-width: 0;
 }
 
@@ -554,7 +561,7 @@ button {
 }
 
 .preview-stamp-image {
-  padding: calc(14px * var(--stamp-preview-scale));
+  padding: calc(12px * var(--stamp-preview-scale) * var(--stamp-spacing-scale));
 }
 
 .stamp-selection {
