@@ -455,6 +455,95 @@ describe('PdfStampStudio shell', () => {
     window.dispatchEvent(new Event('pointerup'));
   });
 
+  it('allows one resize drag to reach the configured minimum stamp size', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.5,
+        width: 0.52,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    previewCanvas!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 800,
+        right: 600,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const stampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(stampBody).not.toBeNull();
+    Object.defineProperty(stampBody!, 'offsetWidth', { configurable: true, value: 312 });
+    Object.defineProperty(stampBody!, 'offsetHeight', { configurable: true, value: 190 });
+
+    const eastHandle = document.querySelector('.stamp-handle.is-e') as HTMLElement | null;
+    expect(eastHandle).not.toBeNull();
+    eastHandle!.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 456,
+      clientY: 400,
+    }));
+
+    window.dispatchEvent(Object.assign(new Event('pointermove', { bubbles: true, cancelable: true }), {
+      clientX: 300,
+      clientY: 400,
+    }));
+
+    expect(internalStudio.state.stamp.placement.width).toBeCloseTo(0.0832);
+
+    window.dispatchEvent(new Event('pointerup'));
+  });
+
   it('scales preview text down with the stamp and preserves the smaller minimum size', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');

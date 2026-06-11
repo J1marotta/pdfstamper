@@ -117,6 +117,7 @@ const DEFAULT_STAMP_WIDTH_RATIO = 0.52;
 const STAMP_MIN_PREVIEW_SCALE = 0.16;
 const STAMP_MIN_WIDTH_RATIO = DEFAULT_STAMP_WIDTH_RATIO * STAMP_MIN_PREVIEW_SCALE;
 const STAMP_MAX_WIDTH_RATIO = 0.88;
+const STAMP_MIN_RESIZE_RATIO = 0.01;
 const STAMP_SNAP_THRESHOLD = 0.02;
 
 type PdfModule = typeof import('./pdf');
@@ -1803,16 +1804,16 @@ function scaleRatioFromHandle(
   const currentDy = currentVector.y;
 
   if (handle === 'e' || handle === 'w') {
-    return Math.max(0.4, Math.abs(currentDx) / Math.max(1, Math.abs(startDx)));
+    return Math.max(STAMP_MIN_RESIZE_RATIO, Math.abs(currentDx) / Math.max(1, Math.abs(startDx)));
   }
 
   if (handle === 'n' || handle === 's') {
-    return Math.max(0.4, Math.abs(currentDy) / Math.max(1, Math.abs(startDy)));
+    return Math.max(STAMP_MIN_RESIZE_RATIO, Math.abs(currentDy) / Math.max(1, Math.abs(startDy)));
   }
 
   const widthScale = Math.abs(currentDx) / Math.max(1, Math.abs(startDx));
   const heightScale = Math.abs(currentDy) / Math.max(1, Math.abs(startDy));
-  return Math.max(0.4, Math.max(widthScale, heightScale));
+  return Math.max(STAMP_MIN_RESIZE_RATIO, Math.max(widthScale, heightScale));
 }
 
 function renderStampTable(
