@@ -498,7 +498,7 @@ describe('PdfStampStudio shell', () => {
         pageId: 'pdf-1',
         x: 0.5,
         y: 0.7,
-        width: 0.208,
+        width: 0.0832,
         rotation: 0,
       },
     };
@@ -508,8 +508,75 @@ describe('PdfStampStudio shell', () => {
 
     const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
     expect(stampObject).not.toBeNull();
-    expect(stampObject?.getAttribute('style')).toContain('--stamp-preview-scale:0.4');
-    expect(stampObject?.getAttribute('style')).toContain('width:20.8%');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-preview-scale:0.16');
+    expect(stampObject?.getAttribute('style')).toContain('width:8.32%');
+  });
+
+  it('switches image uploads into a visible stamp mode and shows the selected filename', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          mode: 'text' | 'image' | 'both';
+          imageName: string | null;
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      handleStampImage: (file: File) => Promise<void>;
+      renderControlState: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      mode: 'text',
+      imageName: null,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 0.52,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const file = new File([new Uint8Array([137, 80, 78, 71])], 'seal.png', { type: 'image/png' });
+    await internalStudio.handleStampImage(file);
+
+    expect(internalStudio.state.stamp.mode).toBe('both');
+    expect(internalStudio.state.stamp.imageName).toBe('seal.png');
+    expect(document.querySelector('#stamp-controls')?.textContent).toContain('Using seal.png.');
+    expect(document.querySelector('.preview-stamp-image')).not.toBeNull();
   });
 
   it('reveals status for pre-upload errors instead of leaving it hidden', () => {
@@ -848,7 +915,7 @@ describe('PdfStampStudio shell', () => {
     payeeInput!.dispatchEvent(new Event('input', { bubbles: true }));
 
     expect(revokeSpy).toHaveBeenCalledWith('blob:stale-export');
-    expect(document.querySelector('.action-button[href]')).toBeNull();
+    expect(document.querySelector('.action-button[data-action="download-export"]')).toBeNull();
     expect(document.querySelector('#export-actions')?.textContent).toContain('Generate stamped PDF');
   });
 

@@ -673,6 +673,11 @@ button {
   line-height: 1.4;
 }
 
+.inspector-field small {
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
 .toggle {
   display: flex;
   align-items: center;

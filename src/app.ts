@@ -48,6 +48,7 @@ interface AppState {
   stampImageUrl: string | null;
   lastExportUrl: string | null;
   lastExportName: string | null;
+  lastExportBlob: Blob | null;
   advancedOpen: boolean;
   blankInsertMode: 'after-current' | 'at-end';
 }
@@ -113,7 +114,8 @@ const EMPTY_STATS: FillStats = {
 };
 
 const DEFAULT_STAMP_WIDTH_RATIO = 0.52;
-const STAMP_MIN_WIDTH_RATIO = DEFAULT_STAMP_WIDTH_RATIO * 0.4;
+const STAMP_MIN_PREVIEW_SCALE = 0.16;
+const STAMP_MIN_WIDTH_RATIO = DEFAULT_STAMP_WIDTH_RATIO * STAMP_MIN_PREVIEW_SCALE;
 const STAMP_MAX_WIDTH_RATIO = 0.88;
 const STAMP_SNAP_THRESHOLD = 0.02;
 
@@ -188,6 +190,7 @@ export class PdfStampStudio {
       stampImageUrl: null,
       lastExportUrl: null,
       lastExportName: null,
+      lastExportBlob: null,
       advancedOpen: false,
       blankInsertMode: 'after-current',
     };
@@ -227,6 +230,11 @@ export class PdfStampStudio {
 
       if (action === 'export-pdf') {
         void this.handleExport();
+        return;
+      }
+
+      if (action === 'download-export') {
+        void this.downloadLastExport();
         return;
       }
 
@@ -818,11 +826,19 @@ export class PdfStampStudio {
     this.clearStampImage();
     this.state.stamp = {
       ...this.state.stamp,
+      mode: this.state.stamp.mode === 'text' ? 'both' : this.state.stamp.mode,
       imageBytes: new Uint8Array(await file.arrayBuffer()),
       imageMime: mime,
       imageName: file.name,
     };
     this.state.stampImageUrl = URL.createObjectURL(file);
+    this.setNotice(
+      isStampPlaced(this.state.stamp)
+        ? `Image added from ${file.name}.`
+        : `Image added from ${file.name}. Place the stamp to preview it.`,
+      'success',
+    );
+    this.renderStatus();
     this.renderStampControls();
     this.renderPreviewStamp();
   }
@@ -899,6 +915,43 @@ export class PdfStampStudio {
     void this.renderPreview();
     this.setNotice('Blank page added. Click anywhere on it if you want to move the stamp there.', 'neutral');
     this.renderStatus();
+  }
+
+  private async downloadLastExport(): Promise<void> {
+    if (!this.state.lastExportBlob || !this.state.lastExportName || !this.state.lastExportUrl) {
+      return;
+    }
+
+    const savePicker = getSaveFilePicker();
+    if (savePicker) {
+      try {
+        const handle = await savePicker({
+          suggestedName: this.state.lastExportName,
+          types: [
+            {
+              description: 'PDF document',
+              accept: {
+                'application/pdf': ['.pdf'],
+              },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(this.state.lastExportBlob);
+        await writable.close();
+        this.setNotice(`Stamped PDF saved as ${this.state.lastExportName}.`, 'success');
+        this.renderStatus();
+        return;
+      } catch (error) {
+        if (isSaveDialogAbort(error)) {
+          return;
+        }
+
+        console.error(error);
+      }
+    }
+
+    triggerBrowserDownload(this.state.lastExportUrl, this.state.lastExportName);
   }
 
   private deleteCurrentPage(): void {
@@ -1213,6 +1266,11 @@ export class PdfStampStudio {
         <label class="inspector-field">
           <span>Optional image stamp</span>
           <input type="file" accept="image/png,image/jpeg" />
+          <small>${
+            hasImage && this.state.stamp.imageName
+              ? `Using ${escapeHtml(this.state.stamp.imageName)}.`
+              : 'Upload a PNG or JPG to add a seal, signature, or logo to the stamp.'
+          }</small>
         </label>
         <label class="toggle">
           <input data-stamp-setting="flatten" type="checkbox" ${this.state.stamp.flatten ? 'checked' : ''} />
@@ -1241,9 +1299,9 @@ export class PdfStampStudio {
     const primaryAction =
       this.state.lastExportUrl && this.state.lastExportName
         ? `
-          <a class="action-button is-primary" href="${this.state.lastExportUrl}" download="${escapeAttribute(this.state.lastExportName)}" rel="noopener">
+          <button type="button" class="action-button is-primary" data-action="download-export">
             Download stamped PDF
-          </a>
+          </button>
           <button type="button" class="ghost-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
             Regenerate
           </button>
@@ -1345,7 +1403,9 @@ export class PdfStampStudio {
     const showImage = shouldShowStampImage(this.state.stamp, hasImage);
     const rows = buildStampRows(this.state.stamp);
     const placement = this.state.stamp.placement;
-    const previewScale = clampValue(placement.width / DEFAULT_STAMP_WIDTH_RATIO, 0.4, 1.8);
+    const previewScale = Number(
+      clampValue(placement.width / DEFAULT_STAMP_WIDTH_RATIO, STAMP_MIN_PREVIEW_SCALE, 1.8).toFixed(2),
+    );
     const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
     const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
     const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
@@ -1459,6 +1519,7 @@ export class PdfStampStudio {
 
   private setLastExport(blob: Blob, fileName: string): void {
     this.clearLastExport();
+    this.state.lastExportBlob = blob;
     this.state.lastExportUrl = URL.createObjectURL(blob);
     this.state.lastExportName = fileName;
   }
@@ -1468,6 +1529,7 @@ export class PdfStampStudio {
       URL.revokeObjectURL(this.state.lastExportUrl);
     }
 
+    this.state.lastExportBlob = null;
     this.state.lastExportUrl = null;
     this.state.lastExportName = null;
   }
@@ -1847,6 +1909,40 @@ function cloneStampSettings(stamp: StampSettings): StampSettings {
 
 function selectOption(value: string, label: string, selectedValue: string): string {
   return `<option value="${value}" ${value === selectedValue ? 'selected' : ''}>${label}</option>`;
+}
+
+type SavePickerHandle = {
+  createWritable(): Promise<{
+    write(data: Blob): Promise<void>;
+    close(): Promise<void>;
+  }>;
+};
+
+type SavePicker = (options: {
+  suggestedName?: string;
+  types?: Array<{
+    description: string;
+    accept: Record<string, string[]>;
+  }>;
+}) => Promise<SavePickerHandle>;
+
+function getSaveFilePicker(): SavePicker | undefined {
+  return (window as typeof window & { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+}
+
+function isSaveDialogAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function triggerBrowserDownload(url: string, fileName: string): void {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.rel = 'noopener';
+  anchor.style.display = 'none';
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 function inferImageMime(fileName: string): string | null {

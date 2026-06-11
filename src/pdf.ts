@@ -36,6 +36,7 @@ export interface LoadedPdfBundle {
 
 const STAMP_RED = rgb(0.66, 0.13, 0.1);
 const INK = rgb(0.16, 0.14, 0.15);
+const MIN_STAMP_EXPORT_WIDTH = 48;
 
 export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
   const rawBuffer = await file.arrayBuffer();
@@ -348,7 +349,10 @@ function drawStamp(
   const pageWidth = page.getWidth();
   const pageHeight = page.getHeight();
   const margin = 18;
-  const maxWidth = Math.max(220, Math.min(pageWidth - margin * 2, pageWidth * stamp.placement.width));
+  const maxWidth = Math.max(
+    MIN_STAMP_EXPORT_WIDTH,
+    Math.min(pageWidth - margin * 2, pageWidth * stamp.placement.width),
+  );
   const scale = maxWidth / 460;
   const showTable = shouldShowStampTable(stamp, Boolean(embeddedImage));
   const rows = showTable ? buildPdfStampRows(stamp) : [];

@@ -11,6 +11,9 @@ vi.mock('./pdf', () => ({
 describe('PdfStampStudio export flow', () => {
   const originalCreateObjectURL = URL.createObjectURL;
   const originalRevokeObjectURL = URL.revokeObjectURL;
+  const originalShowSaveFilePicker = (
+    window as typeof window & { showSaveFilePicker?: unknown }
+  ).showSaveFilePicker;
 
   beforeEach(() => {
     vi.resetModules();
@@ -28,6 +31,7 @@ describe('PdfStampStudio export flow', () => {
     document.body.innerHTML = '';
     URL.createObjectURL = originalCreateObjectURL;
     URL.revokeObjectURL = originalRevokeObjectURL;
+    (window as typeof window & { showSaveFilePicker?: unknown }).showSaveFilePicker = originalShowSaveFilePicker;
     vi.restoreAllMocks();
   });
 
@@ -53,6 +57,7 @@ describe('PdfStampStudio export flow', () => {
         exporting: boolean;
       };
       handleExport: () => Promise<void>;
+      downloadLastExport: () => Promise<void>;
       renderControlState: () => void;
       renderExportPanel: () => void;
     };
@@ -86,7 +91,7 @@ describe('PdfStampStudio export flow', () => {
     return internalStudio;
   }
 
-  it('keeps a visible download link available after generating a stamped PDF', async () => {
+  it('keeps a visible download action available after generating a stamped PDF', async () => {
     const internalStudio = await seedReadyStudio();
 
     expect(document.querySelector('#export-actions')?.textContent).toContain('Generate stamped PDF');
@@ -96,11 +101,11 @@ describe('PdfStampStudio export flow', () => {
     expect(exportFilledPdf).toHaveBeenCalledTimes(1);
     expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
 
-    const primaryLink = document.querySelector('.action-button[href]') as HTMLAnchorElement | null;
-    expect(primaryLink).not.toBeNull();
-    expect(primaryLink?.textContent).toContain('Download stamped PDF');
-    expect(primaryLink?.href).toContain('blob:latest-export-1');
-    expect(primaryLink?.download).toBe('resume-stamped.pdf');
+    const downloadButton = document.querySelector(
+      '.action-button[data-action="download-export"]',
+    ) as HTMLButtonElement | null;
+    expect(downloadButton).not.toBeNull();
+    expect(downloadButton?.textContent).toContain('Download stamped PDF');
     expect(document.querySelector('#export-actions')?.textContent).toContain('Regenerate');
   });
 
@@ -114,9 +119,31 @@ describe('PdfStampStudio export flow', () => {
     expect(URL.createObjectURL).toHaveBeenCalledTimes(2);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:latest-export-1');
 
-    const primaryLink = document.querySelector('.action-button[href]') as HTMLAnchorElement | null;
-    expect(primaryLink).not.toBeNull();
-    expect(primaryLink?.href).toContain('blob:latest-export-2');
-    expect(primaryLink?.download).toBe('resume-stamped.pdf');
+    const downloadButton = document.querySelector(
+      '.action-button[data-action="download-export"]',
+    ) as HTMLButtonElement | null;
+    expect(downloadButton).not.toBeNull();
+    expect(downloadButton?.textContent).toContain('Download stamped PDF');
+  });
+
+  it('uses the native save picker from the final download button when available', async () => {
+    const internalStudio = await seedReadyStudio();
+    await internalStudio.handleExport();
+
+    const write = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
+    const showSaveFilePicker = vi.fn(async () => ({
+      createWritable: async () => ({
+        write,
+        close,
+      }),
+    }));
+    (window as typeof window & { showSaveFilePicker?: unknown }).showSaveFilePicker = showSaveFilePicker;
+
+    await internalStudio.downloadLastExport();
+
+    expect(showSaveFilePicker).toHaveBeenCalledTimes(1);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 });
