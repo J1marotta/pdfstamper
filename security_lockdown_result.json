@@ -1,0 +1,40 @@
+{
+    "timestamp":  "2026-05-20T20:31:24.5309512+10:00",
+    "remoteAssistance":  {
+                             "disabled":  true,
+                             "fAllowToGetHelp":  0
+                         },
+    "apache":  {
+                   "configChanged":  true,
+                   "backup":  "C:\\Users\\James\\Documents\\Code\\pfdstamper\\security-backups\\httpd.conf.pre-lockdown.bak",
+                   "serviceStatus":  "Running"
+               },
+    "postgres":  {
+                     "configChanged":  true,
+                     "backup":  "C:\\Users\\James\\Documents\\Code\\pfdstamper\\security-backups\\postgresql.conf.pre-lockdown.bak",
+                     "serviceStatus":  "Running"
+                 },
+    "verification":  {
+                         "apacheLocalListen":  [
+                                                   {
+                                                       "LocalAddress":  "127.0.0.1",
+                                                       "LocalPort":  8080
+                                                   }
+                                               ],
+                         "postgresLocalListen":  [
+                                                     {
+                                                         "LocalAddress":  "::1",
+                                                         "LocalPort":  5432
+                                                     },
+                                                     {
+                                                         "LocalAddress":  "127.0.0.1",
+                                                         "LocalPort":  5432
+                                                     }
+                                                 ],
+                         "lanIp":  "192.168.1.107",
+                         "apacheLan8080":  false,
+                         "postgresLan5432":  false,
+                         "apacheLoopback8080":  true,
+                         "postgresLoopback5432":  true
+                     }
+}
