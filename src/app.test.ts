@@ -33,11 +33,12 @@ describe('PdfStampStudio shell', () => {
     expect(document.querySelector('#advanced-sheet')).not.toBeNull();
   });
 
-  it('lets the stamp card inherit the resize scale from the selection object', () => {
+  it('keeps resize scale variables on the selection object', () => {
     const styleCss = readFileSync('src/style.css', 'utf8');
 
-    expect(styleCss).toMatch(/\.preview-stamp-object\s*{[^}]*--stamp-scale: 1;/s);
-    expect(styleCss).not.toMatch(/\.preview-stamp-card\s*{[^}]*--stamp-scale:/s);
+    expect(styleCss).toMatch(/\.preview-stamp-object\s*{[^}]*--stamp-scale-x: 1;/s);
+    expect(styleCss).toMatch(/\.preview-stamp-object\s*{[^}]*--stamp-scale-y: 1;/s);
+    expect(styleCss).not.toMatch(/\.preview-stamp-card\s*{[^}]*--stamp-scale-[xy]:/s);
   });
 
   it('shows the placed stamp overlay on the active page', () => {
@@ -465,6 +466,130 @@ describe('PdfStampStudio shell', () => {
     window.dispatchEvent(new Event('pointerup'));
   });
 
+  it('keeps side resize handles axis-specific while corners resize both axes', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stampSelected: boolean;
+        stamp: {
+          placement: { pageId: string | null; x: number; y: number; width: number; height?: number; rotation: number };
+        };
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stampSelected = true;
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.5,
+        width: 300,
+        height: 160,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
+    expect(previewCanvas).not.toBeNull();
+    previewCanvas!.hidden = false;
+    previewCanvas!.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 600,
+        height: 800,
+        right: 600,
+        bottom: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    const stampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(stampBody).not.toBeNull();
+    Object.defineProperty(stampBody!, 'offsetWidth', { configurable: true, value: 302.5 });
+    Object.defineProperty(stampBody!, 'offsetHeight', { configurable: true, value: 152 });
+
+    const eastHandle = document.querySelector('.stamp-handle.is-e') as HTMLElement | null;
+    expect(eastHandle).not.toBeNull();
+    eastHandle!.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 451.25,
+      clientY: 400,
+    }));
+    window.dispatchEvent(Object.assign(new Event('pointermove', { bubbles: true, cancelable: true }), {
+      clientX: 526.25,
+      clientY: 520,
+    }));
+
+    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
+    expect(internalStudio.state.stamp.placement.height).toBeCloseTo(160, 1);
+
+    window.dispatchEvent(new Event('pointerup'));
+
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.5,
+        width: 300,
+        height: 160,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderPreviewStamp();
+
+    const nextStampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
+    expect(nextStampBody).not.toBeNull();
+    Object.defineProperty(nextStampBody!, 'offsetWidth', { configurable: true, value: 302.5 });
+    Object.defineProperty(nextStampBody!, 'offsetHeight', { configurable: true, value: 152 });
+
+    const southEastHandle = document.querySelector('.stamp-handle.is-se') as HTMLElement | null;
+    expect(southEastHandle).not.toBeNull();
+    southEastHandle!.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), {
+      clientX: 451.25,
+      clientY: 476,
+    }));
+    window.dispatchEvent(Object.assign(new Event('pointermove', { bubbles: true, cancelable: true }), {
+      clientX: 526.25,
+      clientY: 552,
+    }));
+
+    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
+    expect(internalStudio.state.stamp.placement.height).toBeGreaterThan(160);
+
+    window.dispatchEvent(new Event('pointerup'));
+  });
+
   it('allows one resize drag to reach the configured minimum stamp size', () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
@@ -607,7 +732,9 @@ describe('PdfStampStudio shell', () => {
 
     const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
     expect(stampObject).not.toBeNull();
-    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale:0.0261');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale-x:0.0261');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale-y:0.0469');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-font-scale:0.0261');
     expect(stampObject?.getAttribute('style')).toContain('width:12px');
   });
 

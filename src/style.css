@@ -456,7 +456,9 @@ button {
 }
 
 .preview-stamp-object {
-  --stamp-scale: 1;
+  --stamp-scale-x: 1;
+  --stamp-scale-y: 1;
+  --stamp-font-scale: 1;
   position: absolute;
   transform-origin: center;
   pointer-events: auto;
@@ -470,13 +472,13 @@ button {
 }
 
 .preview-stamp-card {
-  width: 460px;
+  width: 100%;
+  height: 100%;
   border: 1px solid rgba(169, 49, 32, 0.24);
   background: rgba(255, 252, 248, 0.94);
   box-shadow: 0 24px 44px rgba(72, 48, 28, 0.1);
   border-radius: 6px;
-  transform: scale(var(--stamp-scale));
-  transform-origin: top left;
+  overflow: hidden;
 }
 
 .preview-stamp-object.is-selected .preview-stamp-card {
@@ -487,13 +489,13 @@ button {
 
 .stamp-table-preview {
   width: 100%;
-  font-size: 16px;
+  font-size: calc(16px * var(--stamp-font-scale));
 }
 
 .stamp-table-row {
   display: grid;
-  grid-template-columns: 156px minmax(0, 1fr);
-  height: calc(var(--stamp-row-height, 32) * 1px);
+  grid-template-columns: calc(156px * var(--stamp-scale-x)) minmax(0, 1fr);
+  height: calc(var(--stamp-row-height, 32) * 1px * var(--stamp-scale-y));
   border-bottom: 1px solid rgba(169, 49, 32, 0.22);
 }
 
@@ -504,19 +506,27 @@ button {
 .stamp-table-label {
   display: grid;
   align-content: center;
-  padding: 0.66em 0.7em 0.66em 0.86em;
+  padding:
+    calc(10.5px * var(--stamp-scale-y))
+    calc(11.2px * var(--stamp-scale-x))
+    calc(10.5px * var(--stamp-scale-y))
+    calc(13.8px * var(--stamp-scale-x));
   border-right: 1px solid rgba(169, 49, 32, 0.22);
   color: var(--stamp);
   font-size: 0.78em;
   font-weight: 700;
   letter-spacing: 0.02em;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 .stamp-table-value,
 .stamp-table-input-wrap {
   display: grid;
   align-content: center;
-  padding: 0.54em 0.82em;
+  padding:
+    calc(8.6px * var(--stamp-scale-y))
+    calc(13.1px * var(--stamp-scale-x));
   min-width: 0;
 }
 
@@ -563,7 +573,9 @@ button {
 }
 
 .preview-stamp-image {
-  padding: 12px;
+  padding:
+    calc(12px * var(--stamp-scale-y))
+    calc(12px * var(--stamp-scale-x));
 }
 
 .stamp-selection {

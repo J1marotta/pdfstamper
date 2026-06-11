@@ -423,9 +423,12 @@ export class PdfStampStudio {
         return;
       }
 
+      const baseHeight = this.getCurrentStampBaseHeight();
+      const startWidth = stampWidthPoints(this.state.stamp.placement.width, currentPage);
       const startPlacement = {
         ...this.state.stamp.placement,
-        width: stampWidthPoints(this.state.stamp.placement.width, currentPage),
+        width: startWidth,
+        height: stampHeightPoints(this.state.stamp.placement.height, startWidth, baseHeight, currentPage),
       };
       if (startPlacement.width !== this.state.stamp.placement.width) {
         this.state.stamp = {
@@ -649,7 +652,14 @@ export class PdfStampStudio {
       const halfHeight = interaction.startHeightPx / 2;
       const nextCenterX = startCenterX + (event.clientX - interaction.startClientX);
       const nextCenterY = startCenterY + (event.clientY - interaction.startClientY);
-      this.updatePlacementFromPixels(nextCenterX, nextCenterY, interaction.startPlacement.width, halfWidth, halfHeight);
+      this.updatePlacementFromPixels(
+        nextCenterX,
+        nextCenterY,
+        interaction.startPlacement.width,
+        interaction.startPlacement.height,
+        halfWidth,
+        halfHeight,
+      );
       this.renderPreviewStamp();
       return;
     }
@@ -677,7 +687,12 @@ export class PdfStampStudio {
       return;
     }
 
-    const ratio = scaleRatioFromHandle(interaction.handle!, {
+    const currentPage = this.getCurrentPage();
+    if (!currentPage) {
+      return;
+    }
+
+    const nextSizePx = resizePreviewSizeFromHandle(interaction.handle!, {
       centerX: stageRect.left + startCenterX,
       centerY: stageRect.top + startCenterY,
       startX: interaction.startClientX,
@@ -687,19 +702,19 @@ export class PdfStampStudio {
       rotation: interaction.startPlacement.rotation,
       startWidth: interaction.startWidthPx,
       startHeight: interaction.startHeightPx,
+      minWidth: xPointsToPreviewPixels(STAMP_MIN_WIDTH_POINTS, currentPage, stageRect),
+      minHeight: yPointsToPreviewPixels(STAMP_MIN_WIDTH_POINTS, currentPage, stageRect),
     });
-    const nextWidthPoints = Math.max(
-      STAMP_MIN_WIDTH_POINTS,
-      interaction.startPlacement.width * ratio,
+    const nextWidthPoints = previewPixelsToXPoints(nextSizePx.width, currentPage, stageRect);
+    const nextHeightPoints = previewPixelsToYPoints(nextSizePx.height, currentPage, stageRect);
+    this.updatePlacementFromPixels(
+      startCenterX,
+      startCenterY,
+      nextWidthPoints,
+      nextHeightPoints,
+      nextSizePx.width / 2,
+      nextSizePx.height / 2,
     );
-    const currentPage = this.getCurrentPage();
-    if (!currentPage) {
-      return;
-    }
-
-    const nextWidthPx = pointsToPreviewPixels(nextWidthPoints, currentPage, stageRect);
-    const nextHeightPx = interaction.startHeightPx * (nextWidthPx / interaction.startWidthPx);
-    this.updatePlacementFromPixels(startCenterX, startCenterY, nextWidthPoints, nextWidthPx / 2, nextHeightPx / 2);
     this.renderPreviewStamp();
   };
 
@@ -718,6 +733,7 @@ export class PdfStampStudio {
     centerXPx: number,
     centerYPx: number,
     widthPoints: number,
+    heightPoints: number | undefined,
     halfWidthPx: number,
     halfHeightPx: number,
   ): void {
@@ -745,6 +761,7 @@ export class PdfStampStudio {
         x: nextX,
         y: nextY,
         width: widthPoints,
+        height: heightPoints,
       },
     };
     this.invalidateLastExport();
@@ -1420,12 +1437,15 @@ export class PdfStampStudio {
     const showImage = shouldShowStampImage(this.state.stamp, hasImage);
     const rows = buildStampRows(this.state.stamp);
     const placement = this.state.stamp.placement;
-    const widthPoints = stampWidthPoints(placement.width, currentPage);
-    const stageRect = this.getPreviewStageRect();
-    const stampWidthPx = pointsToPreviewPixels(widthPoints, currentPage, stageRect);
-    const previewScale = Number((stampWidthPx / STAMP_PREVIEW_BASE_WIDTH).toFixed(4));
     const baseHeight = stampPreviewBaseHeight(rows, showTable, showImage);
-    const stampHeightPx = Math.max(1, baseHeight * previewScale);
+    const widthPoints = stampWidthPoints(placement.width, currentPage);
+    const heightPoints = stampHeightPoints(placement.height, widthPoints, baseHeight, currentPage);
+    const stageRect = this.getPreviewStageRect();
+    const stampWidthPx = xPointsToPreviewPixels(widthPoints, currentPage, stageRect);
+    const stampHeightPx = yPointsToPreviewPixels(heightPoints, currentPage, stageRect);
+    const scaleX = Number((stampWidthPx / STAMP_PREVIEW_BASE_WIDTH).toFixed(4));
+    const scaleY = Number((stampHeightPx / baseHeight).toFixed(4));
+    const fontScale = Number(Math.max(0.01, Math.min(scaleX, scaleY)).toFixed(4));
     const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
     const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
     const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
@@ -1446,7 +1466,7 @@ export class PdfStampStudio {
     this.updateContainerMarkup(this.elements.previewStamp, `
       <div
         class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}${interactionClass}"
-        style="--stamp-scale:${previewScale}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${stampWidthPx}px; height:${stampHeightPx}px; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
+        style="--stamp-scale-x:${scaleX}; --stamp-scale-y:${scaleY}; --stamp-font-scale:${fontScale}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${stampWidthPx}px; height:${stampHeightPx}px; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
       >
         <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
@@ -1600,6 +1620,13 @@ export class PdfStampStudio {
     }
 
     return this.state.pages.findIndex((page) => page.id === this.state.previewPageId);
+  }
+
+  private getCurrentStampBaseHeight(): number {
+    const hasImage = Boolean(this.state.stampImageUrl);
+    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
+    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
+    return stampPreviewBaseHeight(buildStampRows(this.state.stamp), showTable, showImage);
   }
 
   private getPreviewStageRect(): DOMRect | null {
@@ -1781,7 +1808,7 @@ function placementFromPointer(
   page: DocumentPageModel,
   widthPoints: number,
 ): StampPlacement {
-  const halfWidth = pointsToPreviewPixels(widthPoints, page, rect) / 2;
+  const halfWidth = xPointsToPreviewPixels(widthPoints, page, rect) / 2;
   const safeX = clampPreviewCenter(clientX - rect.left, halfWidth, rect.width) * rect.width;
   const safeY = clampPreviewCenter(clientY - rect.top, 90, rect.height) * rect.height;
   return {
@@ -1793,7 +1820,7 @@ function placementFromPointer(
   };
 }
 
-function pointsToPreviewPixels(
+function xPointsToPreviewPixels(
   widthPoints: number,
   page: DocumentPageModel,
   rect: Pick<DOMRect, 'width'> | null,
@@ -1802,12 +1829,46 @@ function pointsToPreviewPixels(
   return Math.max(1, (widthPoints / page.width) * previewWidth);
 }
 
+function yPointsToPreviewPixels(
+  heightPoints: number,
+  page: DocumentPageModel,
+  rect: Pick<DOMRect, 'height'> | null,
+): number {
+  const previewHeight = rect?.height && rect.height > 0 ? rect.height : page.height;
+  return Math.max(1, (heightPoints / page.height) * previewHeight);
+}
+
+function previewPixelsToXPoints(widthPx: number, page: DocumentPageModel, rect: Pick<DOMRect, 'width'>): number {
+  return Math.max(STAMP_MIN_WIDTH_POINTS, (widthPx / rect.width) * page.width);
+}
+
+function previewPixelsToYPoints(heightPx: number, page: DocumentPageModel, rect: Pick<DOMRect, 'height'>): number {
+  return Math.max(STAMP_MIN_WIDTH_POINTS, (heightPx / rect.height) * page.height);
+}
+
 function stampWidthPoints(width: number, page: DocumentPageModel): number {
   if (width > 0 && width <= 2) {
     return Math.max(STAMP_MIN_WIDTH_POINTS, width * page.width);
   }
 
   return Math.max(STAMP_MIN_WIDTH_POINTS, width);
+}
+
+function stampHeightPoints(
+  height: number | undefined,
+  widthPoints: number,
+  baseHeight: number,
+  page: DocumentPageModel,
+): number {
+  if (height === undefined) {
+    return Math.max(STAMP_MIN_WIDTH_POINTS, (widthPoints / STAMP_PREVIEW_BASE_WIDTH) * baseHeight);
+  }
+
+  if (height > 0 && height <= 2) {
+    return Math.max(STAMP_MIN_WIDTH_POINTS, height * page.height);
+  }
+
+  return Math.max(STAMP_MIN_WIDTH_POINTS, height);
 }
 
 function clampPreviewCenter(centerPx: number, halfSizePx: number, totalPx: number): number {
@@ -1832,7 +1893,7 @@ function stampPreviewBaseHeight(
   return Math.max(1, tableHeight + gap + (showImage ? STAMP_PREVIEW_IMAGE_HEIGHT : 0));
 }
 
-function scaleRatioFromHandle(
+function resizePreviewSizeFromHandle(
   handle: ResizeHandle,
   input: {
     centerX: number;
@@ -1844,8 +1905,10 @@ function scaleRatioFromHandle(
     rotation: number;
     startWidth: number;
     startHeight: number;
+    minWidth: number;
+    minHeight: number;
   },
-): number {
+): { width: number; height: number } {
   const startVector = rotateVector(
     input.startX - input.centerX,
     input.startY - input.centerY,
@@ -1862,16 +1925,27 @@ function scaleRatioFromHandle(
   const currentDy = currentVector.y;
 
   if (handle === 'e' || handle === 'w') {
-    return Math.max(STAMP_MIN_RESIZE_RATIO, Math.abs(currentDx) / Math.max(1, Math.abs(startDx)));
+    return {
+      width: Math.max(input.minWidth, input.startWidth * resizeRatio(currentDx, startDx)),
+      height: input.startHeight,
+    };
   }
 
   if (handle === 'n' || handle === 's') {
-    return Math.max(STAMP_MIN_RESIZE_RATIO, Math.abs(currentDy) / Math.max(1, Math.abs(startDy)));
+    return {
+      width: input.startWidth,
+      height: Math.max(input.minHeight, input.startHeight * resizeRatio(currentDy, startDy)),
+    };
   }
 
-  const widthScale = Math.abs(currentDx) / Math.max(1, Math.abs(startDx));
-  const heightScale = Math.abs(currentDy) / Math.max(1, Math.abs(startDy));
-  return Math.max(STAMP_MIN_RESIZE_RATIO, Math.max(widthScale, heightScale));
+  return {
+    width: Math.max(input.minWidth, input.startWidth * resizeRatio(currentDx, startDx)),
+    height: Math.max(input.minHeight, input.startHeight * resizeRatio(currentDy, startDy)),
+  };
+}
+
+function resizeRatio(currentDistance: number, startDistance: number): number {
+  return Math.max(STAMP_MIN_RESIZE_RATIO, Math.abs(currentDistance) / Math.max(1, Math.abs(startDistance)));
 }
 
 function renderStampTable(

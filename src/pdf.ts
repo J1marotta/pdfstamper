@@ -37,6 +37,10 @@ export interface LoadedPdfBundle {
 const STAMP_RED = rgb(0.66, 0.13, 0.1);
 const INK = rgb(0.16, 0.14, 0.15);
 const MIN_STAMP_EXPORT_WIDTH = 48;
+const MIN_STAMP_EXPORT_HEIGHT = 12;
+const STAMP_EXPORT_BASE_WIDTH = 460;
+const STAMP_EXPORT_IMAGE_HEIGHT = 160;
+const STAMP_EXPORT_GAP = 10;
 
 export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
   const rawBuffer = await file.arrayBuffer();
@@ -350,10 +354,18 @@ function drawStamp(
   const pageHeight = page.getHeight();
   const margin = 18;
   const maxWidth = exportStampWidthPoints(stamp.placement.width, pageWidth);
-  const scale = maxWidth / 460;
+  const scaleX = maxWidth / STAMP_EXPORT_BASE_WIDTH;
   const showTable = shouldShowStampTable(stamp, Boolean(embeddedImage));
   const rows = showTable ? buildPdfStampRows(stamp) : [];
-  const tableHeight = rows.reduce((sum, row) => sum + row.height * scale, 0);
+  const baseTableHeight = rows.reduce((sum, row) => sum + row.height, 0);
+  const baseBlockHeight =
+    baseTableHeight +
+    (baseTableHeight > 0 && embeddedImage && shouldShowStampImage(stamp, true) ? STAMP_EXPORT_GAP : 0) +
+    (embeddedImage && shouldShowStampImage(stamp, true) ? STAMP_EXPORT_IMAGE_HEIGHT : 0);
+  const targetBlockHeight = exportStampHeightPoints(stamp.placement.height, maxWidth, baseBlockHeight, pageHeight);
+  const scaleY = targetBlockHeight / Math.max(1, baseBlockHeight);
+  const fontScale = Math.min(scaleX, scaleY);
+  const tableHeight = baseTableHeight * scaleY;
 
   let imageWidth = 0;
   let imageHeight = 0;
@@ -361,13 +373,13 @@ function drawStamp(
   if (embeddedImage && shouldShowStampImage(stamp, true)) {
     const ratio = Math.min(
       1,
-      Math.min(maxWidth / embeddedImage.width, (160 * scale) / embeddedImage.height),
+      Math.min(maxWidth / embeddedImage.width, (STAMP_EXPORT_IMAGE_HEIGHT * scaleY) / embeddedImage.height),
     );
     imageWidth = embeddedImage.width * ratio;
     imageHeight = embeddedImage.height * ratio;
   }
 
-  const gap = tableHeight > 0 && imageHeight > 0 ? 10 * scale : 0;
+  const gap = tableHeight > 0 && imageHeight > 0 ? STAMP_EXPORT_GAP * scaleY : 0;
   const blockWidth = Math.max(tableHeight > 0 ? maxWidth : 0, imageWidth);
   const blockHeight = tableHeight + gap + imageHeight;
   const centerX = clampPdfCenter(pageWidth * stamp.placement.x, blockWidth / 2 + margin, pageWidth - blockWidth / 2 - margin, pageWidth);
@@ -382,7 +394,7 @@ function drawStamp(
   const rotation = stamp.placement.rotation;
 
   if (tableHeight > 0) {
-    drawStampTable(page, x, y, maxWidth, rows, boldFont, regularFont, scale, centerX, centerY, rotation);
+    drawStampTable(page, x, y, maxWidth, rows, boldFont, regularFont, scaleX, scaleY, fontScale, centerX, centerY, rotation);
   }
 
   if (embeddedImage && imageWidth > 0 && imageHeight > 0) {
@@ -405,7 +417,7 @@ function drawStamp(
 
   if (blockHeight === 0) {
     const fallbackRows = buildPdfStampRows(stamp);
-    drawStampTable(page, x, y, maxWidth, fallbackRows, boldFont, regularFont, scale, centerX, centerY, rotation);
+    drawStampTable(page, x, y, maxWidth, fallbackRows, boldFont, regularFont, scaleX, scaleY, fontScale, centerX, centerY, rotation);
   }
 }
 
@@ -415,6 +427,23 @@ function exportStampWidthPoints(width: number, pageWidth: number): number {
   }
 
   return Math.max(MIN_STAMP_EXPORT_WIDTH, width);
+}
+
+function exportStampHeightPoints(
+  height: number | undefined,
+  width: number,
+  baseHeight: number,
+  pageHeight: number,
+): number {
+  if (height === undefined) {
+    return Math.max(MIN_STAMP_EXPORT_HEIGHT, (width / STAMP_EXPORT_BASE_WIDTH) * baseHeight);
+  }
+
+  if (height > 0 && height <= 2) {
+    return Math.max(MIN_STAMP_EXPORT_HEIGHT, height * pageHeight);
+  }
+
+  return Math.max(MIN_STAMP_EXPORT_HEIGHT, height);
 }
 
 function clampPdfCenter(value: number, min: number, max: number, extent: number): number {
@@ -470,13 +499,15 @@ function drawStampTable(
   rows: Array<{ labelLines: string[]; valueLines: string[]; height: number; emphasis?: boolean }>,
   boldFont: PDFFont,
   regularFont: PDFFont,
-  scale: number,
+  scaleX: number,
+  scaleY: number,
+  fontScale: number,
   centerX: number,
   centerY: number,
   rotation: number,
 ): void {
-  const totalHeight = rows.reduce((sum, row) => sum + row.height * scale, 0);
-  const labelWidth = Math.min(145, width * 0.34);
+  const totalHeight = rows.reduce((sum, row) => sum + row.height * scaleY, 0);
+  const labelWidth = Math.min(145 * scaleX, width * 0.34);
   const outerOrigin = rotatePoint(x, y, centerX, centerY, rotation);
 
   page.drawRectangle({
@@ -503,7 +534,7 @@ function drawStampTable(
   let cursorTop = y + totalHeight;
 
   rows.forEach((row, index) => {
-    const scaledRowHeight = row.height * scale;
+    const scaledRowHeight = row.height * scaleY;
     const rowBottom = cursorTop - scaledRowHeight;
 
     if (index < rows.length - 1) {
@@ -517,13 +548,13 @@ function drawStampTable(
       });
     }
 
-    const labelSize = 8.6 * scale;
-    const valueSize = (row.emphasis ? 12.8 : 11.4) * scale;
-    const labelStartY = rowBottom + scaledRowHeight - 12 * scale;
+    const labelSize = 8.6 * fontScale;
+    const valueSize = (row.emphasis ? 12.8 : 11.4) * fontScale;
+    const labelStartY = rowBottom + scaledRowHeight - 12 * scaleY;
     row.labelLines.forEach((line, lineIndex) => {
       const labelOrigin = rotatePoint(
-        x + 8 * scale,
-        labelStartY - lineIndex * 10 * scale,
+        x + 8 * scaleX,
+        labelStartY - lineIndex * 10 * fontScale,
         centerX,
         centerY,
         rotation,
@@ -539,11 +570,11 @@ function drawStampTable(
     });
 
     const valueFont = row.emphasis ? boldFont : regularFont;
-    const valueStartY = rowBottom + scaledRowHeight - (row.emphasis ? 15 : 13) * scale;
+    const valueStartY = rowBottom + scaledRowHeight - (row.emphasis ? 15 : 13) * scaleY;
     row.valueLines.forEach((line, lineIndex) => {
       const valueOrigin = rotatePoint(
-        x + labelWidth + 10 * scale,
-        valueStartY - lineIndex * (valueSize + scale),
+        x + labelWidth + 10 * scaleX,
+        valueStartY - lineIndex * (valueSize + fontScale),
         centerX,
         centerY,
         rotation,

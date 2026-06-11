@@ -71,6 +71,8 @@ export interface StampPlacement {
   y: number;
   /** Absolute stamp width in PDF points, independent of the current page width. */
   width: number;
+  /** Absolute stamp height in PDF points, independent of the current page height. */
+  height?: number;
   rotation: number;
 }
 

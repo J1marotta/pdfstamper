@@ -125,6 +125,42 @@ describe('exportFilledPdf', () => {
     expect(exported.getPageCount()).toBe(2);
   });
 
+  it('exports a stamp with independent width and height', async () => {
+    const { exportFilledPdf } = await import('./pdf');
+    const source = await PDFDocument.create();
+    source.addPage([595, 842]);
+    const sourceBytes = new Uint8Array(await source.save());
+    const pages: DocumentPageModel[] = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+
+    const blob = await exportFilledPdf(
+      sourceBytes,
+      [],
+      makeStamp({
+        placement: {
+          pageId: 'pdf-1',
+          x: 0.5,
+          y: 0.5,
+          width: 180,
+          height: 80,
+          rotation: 0,
+        },
+      }),
+      pages,
+    );
+    const exported = await PDFDocument.load(await blob.arrayBuffer());
+
+    expect(exported.getPageCount()).toBe(1);
+  });
+
   it('omits deleted source pages while preserving the requested output order', async () => {
     const { exportFilledPdf } = await import('./pdf');
     const source = await PDFDocument.create();
