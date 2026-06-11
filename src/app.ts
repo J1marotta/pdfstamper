@@ -1406,7 +1406,7 @@ export class PdfStampStudio {
     const previewScale = Number(
       clampValue(placement.width / DEFAULT_STAMP_WIDTH_RATIO, STAMP_MIN_PREVIEW_SCALE, 1.8).toFixed(2),
     );
-    const spacingScale = Number(clampValue(0.46 + previewScale * 0.54, 0.5, 1).toFixed(2));
+    const contentWidthPercent = Number((100 / previewScale).toFixed(2));
     const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
     const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
     const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
@@ -1427,7 +1427,7 @@ export class PdfStampStudio {
     this.updateContainerMarkup(this.elements.previewStamp, `
       <div
         class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}${interactionClass}"
-        style="--stamp-preview-scale:${previewScale}; --stamp-spacing-scale:${spacingScale}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
+        style="--stamp-preview-scale:${previewScale}; --stamp-content-width:${contentWidthPercent}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${placement.width * 100}%; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
       >
         <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
