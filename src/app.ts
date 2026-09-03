@@ -378,6 +378,16 @@ export class PdfStampStudio {
         return;
       }
 
+      if (action === 'nudge-stamp') {
+        const button = target.closest<HTMLElement>('[data-action="nudge-stamp"]');
+        const dx = Number(button?.dataset.dx ?? 0);
+        const dy = Number(button?.dataset.dy ?? 0);
+        if (Number.isFinite(dx) && Number.isFinite(dy) && (dx !== 0 || dy !== 0)) {
+          this.nudgeSelectedStamp(dx, dy);
+        }
+        return;
+      }
+
       if (action === 'open-signature') {
         this.openSignatureDialog();
         return;
@@ -1154,8 +1164,30 @@ export class PdfStampStudio {
     return { id: `stamp-${Date.now()}-${this.stampSerial}`, settings };
   }
 
-  private addStamp(): void {
-    if (!this.state.bundle) {
+  /** Move the selected stamp by points (positive y moves down on screen). */
+  private nudgeSelectedStamp(dxPoints: number, dyPoints: number): void {
+    const selected = this.getSelectedStamp();
+    const currentPage = this.getCurrentPage();
+    if (!selected || !currentPage) {
+      return;
+    }
+
+    const placement = selected.settings.placement;
+    this.activeStamp = {
+      ...selected.settings,
+      placement: {
+        ...placement,
+        x: clampValue(placement.x + dxPoints / currentPage.width, 0, 1),
+        y: clampValue(placement.y + dyPoints / currentPage.height, 0, 1),
+      },
+    };
+    this.invalidateLastExport();
+    this.renderStampControls();
+    this.renderPreviewStamp();
+    this.renderThumbnailRail();
+  }
+
+  private addStamp(): void {    if (!this.state.bundle) {
       return;
     }
 
@@ -2147,6 +2179,12 @@ export class PdfStampStudio {
           <button type="button" class="ghost-button" data-action="open-signature">Sign</button>
           <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
           <button type="button" class="ghost-button" data-action="delete-stamp">Delete stamp</button>
+          <div class="nudge-row" role="group" aria-label="Nudge stamp">
+            <button type="button" data-action="nudge-stamp" data-dx="0" data-dy="-4" aria-label="Move stamp up">↑</button>
+            <button type="button" data-action="nudge-stamp" data-dx="0" data-dy="4" aria-label="Move stamp down">↓</button>
+            <button type="button" data-action="nudge-stamp" data-dx="-4" data-dy="0" aria-label="Move stamp left">←</button>
+            <button type="button" data-action="nudge-stamp" data-dx="4" data-dy="0" aria-label="Move stamp right">→</button>
+          </div>
           ${
             hasImage
               ? '<button type="button" class="ghost-button" data-action="clear-stamp-image">Remove image</button>'

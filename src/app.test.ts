@@ -1545,6 +1545,62 @@ describe('PdfStampStudio shell', () => {
     ).toBeNull();
   });
 
+  it('nudges the selected stamp by points without a pointer drag', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stamps: any;
+        selectedStampId: any;
+      };
+      renderControlState: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'form.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    seedStamp(internalStudio, {
+      placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 300, rotation: 0 },
+    });
+    internalStudio.renderControlState();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    const upButton = document.querySelector('[aria-label="Move stamp up"]') as HTMLButtonElement | null;
+    expect(upButton).not.toBeNull();
+    upButton!.click();
+
+    expect(selectedSettings(internalStudio).placement.y).toBeCloseTo(0.5 - 4 / 842, 6);
+    expect(selectedSettings(internalStudio).placement.x).toBeCloseTo(0.5, 6);
+
+    const rightButton = document.querySelector('[aria-label="Move stamp right"]') as HTMLButtonElement | null;
+    rightButton!.click();
+
+    expect(selectedSettings(internalStudio).placement.x).toBeCloseTo(0.5 + 4 / 595, 6);
+  });
+
   it('opens the signature dialog and turns the pad into an image stamp', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
@@ -1579,13 +1635,17 @@ describe('PdfStampStudio shell', () => {
       );
 
       expect(internalStudio.state.signatureOpen).toBe(true);
-      const canvas = document.querySelector('#signature-canvas') as HTMLCanvasElement | null;
-      expect(canvas).not.toBeNull();
+      const canvasEl = document.querySelector('#signature-canvas') as HTMLCanvasElement | null;
+      expect(canvasEl).not.toBeNull();
+      if (!canvasEl) {
+        throw new Error('signature canvas missing');
+      }
 
-      canvas!.toBlob = ((callback: BlobCallback) => {
+      canvasEl.toBlob = ((callback: BlobCallback) => {
         callback(new Blob(['fake-png'], { type: 'image/png' }));
-      }) as typeof canvas.toBlob;
-      canvas!.getContext = (() => ({})) as typeof canvas.getContext;
+      }) as typeof canvasEl.toBlob;
+      canvasEl.getContext = (() =>
+        ({} as unknown as CanvasRenderingContext2D)) as unknown as typeof canvasEl.getContext;
       internalStudio.signatureHasInk = true;
 
       (document.querySelector('[data-action="use-signature"]') as HTMLButtonElement).click();

@@ -473,6 +473,7 @@ button {
   background: rgba(255, 252, 248, 0.95);
   box-shadow: 0 12px 28px rgba(72, 48, 28, 0.1);
   cursor: grab;
+  touch-action: none;
 }
 
 .preview-textbox.is-selected {
@@ -546,6 +547,7 @@ button {
   width: 100%;
   height: 100%;
   user-select: none;
+  touch-action: none;
 }
 
 .preview-stamp-card {
@@ -803,6 +805,55 @@ button {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.nudge-row {
+  display: flex;
+  gap: 8px;
+}
+
+.nudge-row button {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 246, 0.88);
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0;
+}
+
+@media (pointer: coarse) {
+  .stamp-handle {
+    width: 22px;
+    height: 22px;
+  }
+
+  .stamp-rotate-handle {
+    width: 26px;
+    height: 26px;
+    top: -36px;
+  }
+
+  .stamp-handle.is-n { top: -11px; }
+  .stamp-handle.is-s { bottom: -11px; }
+  .stamp-handle.is-e { right: -11px; }
+  .stamp-handle.is-w { left: -11px; }
+  .stamp-handle.is-ne { right: -11px; top: -11px; }
+  .stamp-handle.is-nw { left: -11px; top: -11px; }
+  .stamp-handle.is-se { right: -11px; bottom: -11px; }
+  .stamp-handle.is-sw { left: -11px; bottom: -11px; }
+
+  .nudge-row button {
+    width: 48px;
+    height: 48px;
+  }
+
+  .textbox-delete {
+    width: 30px;
+    height: 30px;
+  }
 }
 
 .status {
