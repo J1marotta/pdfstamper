@@ -190,6 +190,7 @@ export class PdfStampStudio {
   private pendingPasswordFile: File | null = null;
   private stampImageUrls = new Map<string, string>();
   private signatureHasInk = false;
+  private loadToken = 0;
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
   private stampSerial = 0;
@@ -1258,6 +1259,7 @@ export class PdfStampStudio {
 
     this.clearLastExport();
     this.state.exportConfirmArmed = false;
+    const loadAttempt = ++this.loadToken;
     this.state.loadingPdf = true;
     this.setNotice('Loading the PDF locally and building the page surface…', 'busy');
     this.renderStatus();
@@ -1268,7 +1270,37 @@ export class PdfStampStudio {
     try {
       await this.releasePreviewDocument();
       const { loadPdfBundle } = await getPdfModule();
-      const bundle = await loadPdfBundle(file, password);
+      let lastPercent = -1;
+      const stageMessage = {
+        parse: 'Parsing the PDF locally…',
+        fields: 'Reading form fields…',
+        text: 'Reading page text…',
+      } as const;
+      const bundle = await loadPdfBundle(file, password, {
+        onProgress: (loaded, total) => {
+          if (loadAttempt !== this.loadToken || !total || total <= 0) {
+            return;
+          }
+
+          const percent = Math.min(100, Math.floor((loaded / total) * 100));
+          if (percent >= lastPercent + 5) {
+            lastPercent = percent;
+            this.setNotice(`Loading the PDF locally… ${percent}%`, 'busy');
+            this.renderStatus();
+          }
+        },
+        onStage: (stage) => {
+          if (loadAttempt !== this.loadToken) {
+            return;
+          }
+
+          this.setNotice(stageMessage[stage], 'busy');
+          this.renderStatus();
+        },
+      });
+      if (loadAttempt !== this.loadToken) {
+        return;
+      }
       const seededValues = seedProfileValues(bundle.fields);
       const seededProfile: ProfileValues = {
         ...seededValues,
@@ -1347,13 +1379,17 @@ export class PdfStampStudio {
       this.state.selectedStampId = null;
       this.state.encryptedReadOnly = false;
       this.setNotice(
-        'The PDF could not be parsed. Password-protected or malformed files need a separate handling path.',
+        'The PDF could not be parsed. It may be malformed or use features this workflow does not support.',
         'error',
       );
       this.renderThumbnailRail();
       this.renderFillStats();
       this.renderPreviewMeta();
     } finally {
+      if (loadAttempt !== this.loadToken) {
+        return;
+      }
+
       this.state.loadingPdf = false;
       this.renderControlState();
       this.renderStatus();

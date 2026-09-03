@@ -58,15 +58,38 @@ export function isIncorrectPassword(error: unknown): boolean {
   );
 }
 
-export async function loadPdfBundle(file: File, password?: string): Promise<LoadedPdfBundle> {
+export type LoadStage = 'parse' | 'fields' | 'text';
+
+export interface LoadHooks {
+  onProgress?: (loaded: number, total: number) => void;
+  onStage?: (stage: LoadStage) => void;
+}
+
+export async function loadPdfBundle(
+  file: File,
+  password?: string,
+  hooks: LoadHooks = {},
+): Promise<LoadedPdfBundle> {
   const rawBuffer = await file.arrayBuffer();
   const { sourceBytes, editableBytes, previewBytes } = clonePdfBytesForWorkflows(rawBuffer);
+  hooks.onStage?.('parse');
+  const editablePromise = PDFDocument.load(editableBytes, {
+    ignoreEncryption: true,
+    updateMetadata: false,
+  }).then((document) => {
+    hooks.onStage?.('fields');
+    return document;
+  });
+  const loadingTask = getDocument({ data: previewBytes, password });
+  if (hooks.onProgress) {
+    const onProgress = hooks.onProgress;
+    loadingTask.onProgress = (progress: { loaded: number; total: number }) => {
+      onProgress(progress.loaded, progress.total);
+    };
+  }
   const [editableDocument, previewDocument] = await Promise.all([
-    PDFDocument.load(editableBytes, {
-      ignoreEncryption: true,
-      updateMetadata: false,
-    }),
-    getDocument({ data: previewBytes, password }).promise,
+    editablePromise,
+    loadingTask.promise,
   ]);
 
   const encrypted = editableDocument.isEncrypted;
@@ -78,6 +101,7 @@ export async function loadPdfBundle(file: File, password?: string): Promise<Load
     width: page.getWidth(),
     height: page.getHeight(),
   }));
+  hooks.onStage?.('text');
   const textDigest = await extractTextDigest(previewDocument, Math.min(pageCount, 6));
 
   return {
