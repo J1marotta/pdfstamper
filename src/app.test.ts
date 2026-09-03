@@ -1544,4 +1544,94 @@ describe('PdfStampStudio shell', () => {
       document.querySelector('.preview-stamp-object[data-stamp-id="stamp-1"] input'),
     ).toBeNull();
   });
+
+  it('opens the signature dialog and turns the pad into an image stamp', async () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const createObjectURL = URL.createObjectURL;
+    URL.createObjectURL = (() => 'blob:signature') as typeof URL.createObjectURL;
+    try {
+      const studio = new PdfStampStudio(root!);
+      const internalStudio = studio as unknown as {
+        state: {
+          bundle: { fileName: string; pageCount: number } | null;
+          stamps: any;
+          selectedStampId: any;
+          signatureOpen: boolean;
+        };
+        signatureHasInk: boolean;
+      };
+
+      internalStudio.state.bundle = {
+        fileName: 'form.pdf',
+        pageCount: 1,
+      };
+
+      const signButton = document.querySelector('[data-action="open-signature"]');
+      expect(signButton).toBeNull();
+
+      internalStudio.state.stamps = [];
+      (studio as unknown as { renderStampControls: () => void }).renderStampControls();
+      document.querySelector('[data-action="open-signature"]')?.dispatchEvent(
+        new Event('click', { bubbles: true }),
+      );
+
+      expect(internalStudio.state.signatureOpen).toBe(true);
+      const canvas = document.querySelector('#signature-canvas') as HTMLCanvasElement | null;
+      expect(canvas).not.toBeNull();
+
+      canvas!.toBlob = ((callback: BlobCallback) => {
+        callback(new Blob(['fake-png'], { type: 'image/png' }));
+      }) as typeof canvas.toBlob;
+      canvas!.getContext = (() => ({})) as typeof canvas.getContext;
+      internalStudio.signatureHasInk = true;
+
+      (document.querySelector('[data-action="use-signature"]') as HTMLButtonElement).click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(internalStudio.state.signatureOpen).toBe(false);
+      expect(internalStudio.state.stamps).toHaveLength(1);
+      expect(internalStudio.state.stamps[0].settings.mode).toBe('image');
+      expect(internalStudio.state.stamps[0].settings.imageName).toContain('signature-');
+      expect(internalStudio.state.selectedStampId).toBe(internalStudio.state.stamps[0].id);
+    } finally {
+      URL.createObjectURL = createObjectURL;
+    }
+  });
+
+  it('refuses an empty signature pad', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        stamps: any;
+        signatureOpen: boolean;
+        notice: { tone: string; message: string };
+      };
+      renderStampControls: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'form.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.stamps = [];
+    internalStudio.renderStampControls();
+    document.querySelector('[data-action="open-signature"]')?.dispatchEvent(
+      new Event('click', { bubbles: true }),
+    );
+
+    expect(internalStudio.state.signatureOpen).toBe(true);
+
+    (document.querySelector('[data-action="use-signature"]') as HTMLButtonElement).click();
+
+    expect(internalStudio.state.stamps).toHaveLength(0);
+    expect(internalStudio.state.signatureOpen).toBe(true);
+  });
 });

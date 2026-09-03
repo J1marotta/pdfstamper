@@ -57,6 +57,7 @@ interface AppState {
   exportConfirmArmed: boolean;
   passwordDialog: { fileName: string; error: string } | null;
   encryptedReadOnly: boolean;
+  signatureOpen: boolean;
   textBoxes: PlacedTextBox[];
   selectedTextBoxId: string | null;
 }
@@ -90,6 +91,7 @@ interface AppElements {
   thumbnailRail: HTMLElement;
   advancedSheet: HTMLElement;
   passwordDialog: HTMLElement;
+  signatureDialog: HTMLElement;
 }
 
 interface ReapplyRenderOptions {
@@ -187,6 +189,7 @@ export class PdfStampStudio {
   private previewRenderChain: Promise<void> = Promise.resolve();
   private pendingPasswordFile: File | null = null;
   private stampImageUrls = new Map<string, string>();
+  private signatureHasInk = false;
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
   private stampSerial = 0;
@@ -227,6 +230,7 @@ export class PdfStampStudio {
       thumbnailRail: this.root.querySelector<HTMLElement>('#thumbnail-rail')!,
       advancedSheet: this.root.querySelector<HTMLElement>('#advanced-sheet')!,
       passwordDialog: this.root.querySelector<HTMLElement>('#password-dialog')!,
+      signatureDialog: this.root.querySelector<HTMLElement>('#signature-dialog')!,
     };
 
     this.state = {
@@ -256,6 +260,7 @@ export class PdfStampStudio {
       exportConfirmArmed: false,
       passwordDialog: null,
       encryptedReadOnly: false,
+      signatureOpen: false,
       textBoxes: [],
       selectedTextBoxId: null,
     };
@@ -370,6 +375,31 @@ export class PdfStampStudio {
 
       if (action === 'add-stamp') {
         this.addStamp();
+        return;
+      }
+
+      if (action === 'open-signature') {
+        this.openSignatureDialog();
+        return;
+      }
+
+      if (action === 'use-signature') {
+        void this.useSignature();
+        return;
+      }
+
+      if (action === 'clear-signature-pad') {
+        this.clearSignaturePad();
+        return;
+      }
+
+      if (action === 'render-signature-text') {
+        this.renderSignatureText();
+        return;
+      }
+
+      if (action === 'cancel-signature') {
+        this.closeSignatureDialog();
         return;
       }
 
@@ -921,6 +951,10 @@ export class PdfStampStudio {
           this.cancelPassword('Password entry cancelled.');
           return;
         }
+        if (this.state.signatureOpen) {
+          this.closeSignatureDialog();
+          return;
+        }
         if (this.state.advancedOpen) {
           this.state.advancedOpen = false;
           this.renderAdvancedSheetVisibility();
@@ -1446,6 +1480,197 @@ export class PdfStampStudio {
     this.renderStatus();
   }
 
+  private openSignatureDialog(): void {
+    if (!this.state.bundle) {
+      return;
+    }
+
+    this.state.signatureOpen = true;
+    this.renderSignatureDialog();
+  }
+
+  private closeSignatureDialog(): void {
+    this.state.signatureOpen = false;
+    this.signatureHasInk = false;
+    this.renderSignatureDialog();
+  }
+
+  private renderSignatureDialog(): void {
+    if (!this.state.signatureOpen) {
+      this.updateContainerMarkup(this.elements.signatureDialog, '');
+      return;
+    }
+
+    this.updateContainerMarkup(this.elements.signatureDialog, `
+      <div class="signature-overlay">
+        <div class="signature-card" role="dialog" aria-modal="true" aria-label="Draw signature">
+          <p class="eyebrow">Signature</p>
+          <h2>Draw or type your signature</h2>
+          <p>It becomes an image stamp you can place anywhere. Nothing leaves this tab.</p>
+          <canvas id="signature-canvas" class="signature-canvas" width="480" height="180" aria-label="Signature drawing pad"></canvas>
+          <label class="inspector-field">
+            <span>Or type a name to render it</span>
+            <input id="signature-typed" type="text" placeholder="Taylor Smith" autocomplete="off" />
+          </label>
+          <div class="inspector-actions">
+            <button type="button" class="ghost-button" data-action="render-signature-text">Render text</button>
+            <button type="button" class="ghost-button" data-action="clear-signature-pad">Clear</button>
+          </div>
+          <div class="inspector-actions">
+            <button type="button" class="action-button is-primary" data-action="use-signature">Use signature</button>
+            <button type="button" class="ghost-button" data-action="cancel-signature">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `);
+    this.signatureHasInk = false;
+    this.wireSignaturePad();
+    this.elements.signatureDialog.querySelector<HTMLInputElement>('#signature-typed')?.focus({ preventScroll: true });
+  }
+
+  private signatureCanvasContext(): { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null {
+    const canvas = this.elements.signatureDialog.querySelector<HTMLCanvasElement>('#signature-canvas');
+    const context = canvas?.getContext('2d') ?? null;
+    if (!canvas || !context) {
+      return null;
+    }
+
+    return { canvas, context };
+  }
+
+  private wireSignaturePad(): void {
+    const pad = this.signatureCanvasContext();
+    if (!pad) {
+      return;
+    }
+
+    const { canvas, context } = pad;
+    const pixelRatio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 480;
+    const cssHeight = 180;
+    canvas.width = Math.floor(cssWidth * pixelRatio);
+    canvas.height = Math.floor(cssHeight * pixelRatio);
+    canvas.style.height = `${cssHeight}px`;
+    context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+    context.lineWidth = 2.5;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    context.strokeStyle = '#1d1816';
+
+    let drawing = false;
+    let last: { x: number; y: number } | null = null;
+    const position = (event: PointerEvent): { x: number; y: number } => {
+      const rect = canvas.getBoundingClientRect();
+      return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    };
+
+    canvas.addEventListener('pointerdown', (event) => {
+      drawing = true;
+      last = position(event);
+      try {
+        canvas.setPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture is best-effort.
+      }
+      event.preventDefault();
+    });
+    canvas.addEventListener('pointermove', (event) => {
+      if (!drawing || !last) {
+        return;
+      }
+
+      event.preventDefault();
+      const next = position(event);
+      context.beginPath();
+      context.moveTo(last.x, last.y);
+      context.lineTo(next.x, next.y);
+      context.stroke();
+      last = next;
+      this.signatureHasInk = true;
+    });
+    const stop = (): void => {
+      drawing = false;
+      last = null;
+    };
+    canvas.addEventListener('pointerup', stop);
+    canvas.addEventListener('pointercancel', stop);
+  }
+
+  private renderSignatureText(): void {
+    const pad = this.signatureCanvasContext();
+    const name = this.elements.signatureDialog.querySelector<HTMLInputElement>('#signature-typed')?.value.trim() ?? '';
+    if (!pad) {
+      return;
+    }
+
+    if (!name) {
+      this.setNotice('Type a name first, or draw directly on the pad.', 'error');
+      this.renderStatus();
+      return;
+    }
+
+    const { canvas, context } = pad;
+    const cssWidth = canvas.clientWidth || 480;
+    context.save();
+    context.font = 'italic 52px Georgia, "Times New Roman", serif';
+    context.fillStyle = '#1d1816';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(name, cssWidth / 2, 90, cssWidth - 32);
+    context.restore();
+    this.signatureHasInk = true;
+  }
+
+  private clearSignaturePad(): void {
+    const pad = this.signatureCanvasContext();
+    if (!pad) {
+      return;
+    }
+
+    pad.context.clearRect(0, 0, pad.canvas.width, pad.canvas.height);
+    this.signatureHasInk = false;
+  }
+
+  private async useSignature(): Promise<void> {
+    const pad = this.signatureCanvasContext();
+    if (!pad) {
+      return;
+    }
+
+    if (!this.signatureHasInk) {
+      this.setNotice('Draw or type your signature first.', 'error');
+      this.renderStatus();
+      return;
+    }
+
+    const blob = await new Promise<Blob | null>((resolve) => pad.canvas.toBlob(resolve, 'image/png'));
+    if (!blob) {
+      this.setNotice('The signature could not be captured in this browser.', 'error');
+      this.renderStatus();
+      return;
+    }
+
+    this.invalidateLastExport();
+    const name = `signature-${new Date().toISOString().slice(0, 10)}.png`;
+    const draft = this.createStamp({ ...defaultStampSettings().placement });
+    draft.settings.mode = 'image';
+    draft.settings.imageBytes = new Uint8Array(await blob.arrayBuffer());
+    draft.settings.imageMime = 'image/png';
+    draft.settings.imageName = name;
+    this.state.stamps = [...this.state.stamps, draft];
+    this.state.selectedStampId = draft.id;
+    this.stampImageUrls.set(draft.id, URL.createObjectURL(blob));
+    this.state.signatureOpen = false;
+    this.signatureHasInk = false;
+    this.renderSignatureDialog();
+    this.persistPreferences();
+    this.setNotice('Signature added. Click on the page to place it.', 'success');
+    this.renderStatus();
+    this.renderStampControls();
+    this.renderThumbnailRail();
+    this.renderPreviewStamp();
+  }
+
   private submitPassword(): void {
     const file = this.pendingPasswordFile;
     if (!file) {
@@ -1652,6 +1877,7 @@ export class PdfStampStudio {
     this.renderFieldList();
     this.renderFillStats();
     this.renderPasswordDialog();
+    this.renderSignatureDialog();
     this.renderStampControls();
     this.renderExportPanel();
     this.renderPreviewMeta();
@@ -1861,6 +2087,7 @@ export class PdfStampStudio {
           </label>
           <div class="inspector-actions">
             <button type="button" class="ghost-button" data-action="add-stamp">Add stamp</button>
+            <button type="button" class="ghost-button" data-action="open-signature">Sign</button>
             <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
           </div>
         </div>
@@ -1917,6 +2144,7 @@ export class PdfStampStudio {
         </label>
         <div class="inspector-actions">
           <button type="button" class="ghost-button" data-action="add-stamp">Add another stamp</button>
+          <button type="button" class="ghost-button" data-action="open-signature">Sign</button>
           <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
           <button type="button" class="ghost-button" data-action="delete-stamp">Delete stamp</button>
           ${
@@ -2512,6 +2740,7 @@ function shellMarkup(): string {
       </section>
 
       <div id="password-dialog"></div>
+      <div id="signature-dialog"></div>
     </div>
   `;
 }
