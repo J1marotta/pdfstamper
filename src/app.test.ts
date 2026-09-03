@@ -1175,4 +1175,66 @@ describe('PdfStampStudio shell', () => {
     internalStudio.renderControlState();
     expect(advancedSheet?.hidden).toBe(true);
   });
+
+  it('warns in the inspector when stamp text will be cut off on export', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stamp: {
+          payee: string;
+          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
+        };
+      };
+      renderStampControls: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'resume.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      payee: 'A very long payee name that cannot possibly fit on one export line at all',
+      placement: {
+        pageId: 'pdf-1',
+        x: 0.5,
+        y: 0.7,
+        width: 300,
+        rotation: 0,
+      },
+    };
+    internalStudio.renderStampControls();
+
+    expect(document.querySelector('.inspector-warning')?.textContent).toContain('cut off on export');
+
+    internalStudio.renderPreviewStamp();
+    expect(document.querySelector('#preview-stamp .stamp-table-row.is-truncated')).not.toBeNull();
+
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      payee: 'Acme',
+    };
+    internalStudio.renderStampControls();
+
+    expect(document.querySelector('.inspector-warning')).toBeNull();
+  });
 });

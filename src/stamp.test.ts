@@ -4,6 +4,7 @@ import {
   buildStampRows,
   formatStampDate,
   isStampPlaced,
+  wrapStampText,
   shouldShowStampImage,
   shouldShowStampOnPage,
   shouldShowStampTable,
@@ -149,5 +150,12 @@ describe('stamp helpers', () => {
   it('exposes the date row as a date input', () => {
     const rows = buildStampRows(makeStamp());
     expect(rows.find((row) => row.key === 'date')?.inputType).toBe('date');
+  });
+
+  it('detects stamp text that export wrapping will cut off', () => {
+    expect(wrapStampText('Acme Pty Ltd', 30, 2)).toMatchObject({ truncated: false });
+    expect(wrapStampText('Supercalifragilisticexpialidocious Pty Ltd', 10, 2).truncated).toBe(true);
+    expect(wrapStampText('one two three four five', 7, 2).truncated).toBe(true);
+    expect(wrapStampText('', 30, 2)).toMatchObject({ lines: [], truncated: false });
   });
 });

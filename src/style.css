@@ -658,6 +658,22 @@ button {
   line-height: 1.45;
 }
 
+.inspector-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(169, 49, 32, 0.34);
+  background: rgba(169, 49, 32, 0.08);
+  color: var(--stamp);
+  line-height: 1.45;
+}
+
+.stamp-table-row.is-truncated .stamp-table-value,
+.stamp-table-row.is-truncated .stamp-table-input {
+  text-decoration: underline wavy rgba(169, 49, 32, 0.65);
+  text-underline-offset: 3px;
+}
+
 .inspector-controls {
   display: grid;
   gap: 12px;
@@ -719,6 +735,10 @@ button {
 }
 
 .status.is-busy {
+  color: var(--warning);
+}
+
+.status.is-warning {
   color: var(--warning);
 }
 

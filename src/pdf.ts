@@ -17,7 +17,7 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { humanizeFieldName, inferSemanticKey } from './heuristics';
-import { buildStampRows, formatStampDate, isStampPlaced, shouldShowStampImage, shouldShowStampTable } from './stamp';
+import { buildStampRows, displayStampRowValue, isStampPlaced, shouldShowStampImage, shouldShowStampTable, wrapStampText } from './stamp';
 import type { DocumentPageModel, PageSize, PdfFieldModel, StampSettings } from './types';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -471,7 +471,7 @@ function buildPdfStampRows(stamp: StampSettings): Array<{
   return buildStampRows(stamp).map((row) =>
     makePdfStampRow(
       row.labelLines,
-      wrapText(row.key === 'date' ? formatStampDate(row.value) : row.value, row.maxCharsPerLine, row.maxLines),
+      wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).lines,
       row.minHeight,
       row.emphasis,
     ),
@@ -598,42 +598,6 @@ function drawStampTable(
     });
 
     cursorTop = rowBottom;
-  });
-}
-
-function wrapText(text: string, maxCharsPerLine: number, maxLines: number): string[] {
-  if (!text.trim()) {
-    return [];
-  }
-
-  const words = text.trim().split(/\s+/);
-  const lines: string[] = [];
-  let current = '';
-
-  words.forEach((word) => {
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length <= maxCharsPerLine) {
-      current = candidate;
-      return;
-    }
-
-    if (current) {
-      lines.push(current);
-    }
-    current = word;
-  });
-
-  if (current) {
-    lines.push(current);
-  }
-
-  const truncated = lines.length > maxLines;
-  return lines.slice(0, maxLines).map((line, index) => {
-    const overflowedLine = line.length > maxCharsPerLine;
-    if (overflowedLine || (index === maxLines - 1 && truncated)) {
-      return `${line.slice(0, Math.max(0, maxCharsPerLine - 3)).trimEnd()}...`;
-    }
-    return line;
   });
 }
 

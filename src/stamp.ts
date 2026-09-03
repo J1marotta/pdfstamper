@@ -132,7 +132,55 @@ const SHORT_MONTHS = [
   'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
 ];
 
-/** Display an ISO `YYYY-MM-DD` stamp date as `20 May 2026`; anything else passes through. */
+/** Display value for a stamp row (the date row shows `20 May 2026`, not ISO). */
+export function displayStampRowValue(row: Pick<StampRowModel, 'key' | 'value'>): string {
+  return row.key === 'date' ? formatStampDate(row.value) : row.value;
+}
+
+/** Wrap stamp text exactly as the PDF export does, also reporting data loss. */
+export function wrapStampText(
+  text: string,
+  maxCharsPerLine: number,
+  maxLines: number,
+): { lines: string[]; truncated: boolean } {
+  if (!text.trim()) {
+    return { lines: [], truncated: false };
+  }
+
+  const words = text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length <= maxCharsPerLine) {
+      current = candidate;
+      return;
+    }
+
+    if (current) {
+      lines.push(current);
+    }
+    current = word;
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  const truncated =
+    lines.length > maxLines || lines.some((line) => line.length > maxCharsPerLine);
+  return {
+    lines: lines.slice(0, maxLines).map((line, index) => {
+      const overflowedLine = line.length > maxCharsPerLine;
+      if (overflowedLine || (index === maxLines - 1 && lines.length > maxLines)) {
+        return `${line.slice(0, Math.max(0, maxCharsPerLine - 3)).trimEnd()}...`;
+      }
+      return line;
+    }),
+    truncated,
+  };
+}
 export function formatStampDate(raw: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
   if (!match) {

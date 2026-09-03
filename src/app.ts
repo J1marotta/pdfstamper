@@ -9,12 +9,13 @@ import {
 import type { LoadedPdfBundle } from './pdf';
 import {
   buildStampRows,
-  formatStampDate,
+  displayStampRowValue,
   isStampPlaced,
   shouldShowStampImage,
   shouldShowStampOnPage,
   shouldShowStampTable,
   syncStampFromProfile,
+  wrapStampText,
 } from './stamp';
 import type {
   DocumentPageModel,
@@ -28,7 +29,7 @@ import type {
 } from './types';
 
 interface NoticeState {
-  tone: 'neutral' | 'busy' | 'success' | 'error';
+  tone: 'neutral' | 'busy' | 'success' | 'warning' | 'error';
   message: string;
 }
 
@@ -955,7 +956,19 @@ export class PdfStampStudio {
 
       const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages);
       this.setLastExport(blob, outputName);
-      this.setNotice('Stamped PDF is ready. Click Download stamped PDF.', 'success');
+      const truncatedExport = shouldShowStampTable(stamp, Boolean(stamp.imageBytes))
+        ? buildStampRows(stamp).filter((row) =>
+            wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated,
+          )
+        : [];
+      if (truncatedExport.length > 0) {
+        this.setNotice(
+          'Stamped PDF is ready, but some stamp text was cut off. Shorten it or enlarge the stamp, then regenerate.',
+          'warning',
+        );
+      } else {
+        this.setNotice('Stamped PDF is ready. Click Download stamped PDF.', 'success');
+      }
     } catch (error) {
       console.error(error);
       this.setNotice('Export failed. Some PDFs have unusual field structures that need a custom fallback.', 'error');
@@ -1317,8 +1330,8 @@ export class PdfStampStudio {
     const hasImage = Boolean(this.state.stampImageUrl);
     const currentPage = this.getCurrentPage();
     const side = this.getInspectorSide();
+    const truncatedKeys = bundleLoaded ? this.stampTruncation() : [];
     this.elements.stampControls.className = `floating-inspector is-${side}`;
-
     if (!bundleLoaded) {
       this.updateContainerMarkup(this.elements.stampControls, `
         <div class="inspector-copy">
@@ -1341,6 +1354,7 @@ export class PdfStampStudio {
         <p class="eyebrow">Stamp</p>
         <h2>${this.state.stampSelected ? 'Direct on-page editing.' : 'One stamp, placed by eye.'}</h2>
         <p>${escapeHtml(placementCopy)}</p>
+        ${truncatedKeys.length > 0 ? '<p class="inspector-warning">Some stamp text will be cut off on export. Shorten it or enlarge the stamp.</p>' : ''}
       </div>
       <div class="inspector-controls">
         <label class="inspector-field">
@@ -1552,7 +1566,7 @@ export class PdfStampStudio {
       >
         <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
-            ${showTable ? renderStampTable(rows, { editable: this.state.stampSelected }) : ''}
+            ${showTable ? renderStampTable(rows, { editable: this.state.stampSelected, truncatedKeys: this.stampTruncation() }) : ''}
             ${
               showImage && this.state.stampImageUrl
                 ? `<img class="stamp-preview-image preview-stamp-image" src="${this.state.stampImageUrl}" alt="Preview stamp image" />`
@@ -1709,6 +1723,20 @@ export class PdfStampStudio {
     const showTable = shouldShowStampTable(this.state.stamp, hasImage);
     const showImage = shouldShowStampImage(this.state.stamp, hasImage);
     return stampPreviewBaseHeight(buildStampRows(this.state.stamp), showTable, showImage);
+  }
+
+  /** Keys of stamp rows whose text will be cut off by export wrapping. */
+  private stampTruncation(): string[] {
+    const hasImage = Boolean(this.state.stampImageUrl);
+    if (!shouldShowStampTable(this.state.stamp, hasImage)) {
+      return [];
+    }
+
+    return buildStampRows(this.state.stamp)
+      .filter((row) =>
+        wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated,
+      )
+      .map((row) => row.key);
   }
 
   private getPreviewStageRect(): DOMRect | null {
@@ -2048,23 +2076,31 @@ function resizeRatio(currentDistance: number, startDistance: number): number {
 
 function renderStampTable(
   rows: ReturnType<typeof buildStampRows>,
-  options: { editable: boolean },
+  options: { editable: boolean; truncatedKeys?: readonly string[] },
 ): string {
+  const truncated = new Set(options.truncatedKeys ?? []);
   return `
     <div class="stamp-table-preview ${options.editable ? 'is-editor' : ''}">
       ${rows
-        .map((row) => (options.editable ? renderEditableStampRow(row) : renderReadonlyStampRow(row)))
+        .map((row) =>
+          options.editable
+            ? renderEditableStampRow(row, truncated.has(row.key))
+            : renderReadonlyStampRow(row, truncated.has(row.key)),
+        )
         .join('')}
     </div>
   `;
 }
 
-function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
+function renderEditableStampRow(
+  row: ReturnType<typeof buildStampRows>[number],
+  truncated: boolean,
+): string {
   const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
   const inputClass = row.emphasis ? 'stamp-table-input is-emphasis' : 'stamp-table-input';
   const inputType = row.inputType ?? 'text';
   return `
-    <label class="stamp-table-row is-editable" style="--stamp-row-height:${row.minHeight};">
+    <label class="stamp-table-row is-editable${truncated ? ' is-truncated' : ''}" style="--stamp-row-height:${row.minHeight};"${truncated ? ' title="This text will be cut off on export. Shorten it or enlarge the stamp."' : ''}>
       <span class="stamp-table-label">${labelHtml}</span>
       <span class="stamp-table-input-wrap">
         <input
@@ -2079,12 +2115,15 @@ function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]):
   `;
 }
 
-function renderReadonlyStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
+function renderReadonlyStampRow(
+  row: ReturnType<typeof buildStampRows>[number],
+  truncated: boolean,
+): string {
   const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
   const valueClass = row.emphasis ? 'stamp-table-value is-emphasis' : 'stamp-table-value';
-  const displayValue = row.key === 'date' ? formatStampDate(row.value) : row.value;
+  const displayValue = displayStampRowValue(row);
   return `
-    <div class="stamp-table-row" style="--stamp-row-height:${row.minHeight};">
+    <div class="stamp-table-row${truncated ? ' is-truncated' : ''}" style="--stamp-row-height:${row.minHeight};"${truncated ? ' title="This text will be cut off on export. Shorten it or enlarge the stamp."' : ''}>
       <div class="stamp-table-label">${labelHtml}</div>
       <div class="${valueClass}">${escapeHtml(displayValue)}</div>
     </div>
