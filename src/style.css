@@ -455,6 +455,83 @@ button {
   pointer-events: none;
 }
 
+.preview-textboxes {
+  position: absolute;
+  inset: 24px;
+  pointer-events: none;
+}
+
+.preview-textbox {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  min-width: 48px;
+  max-width: 72%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(86, 60, 44, 0.2);
+  background: rgba(255, 252, 248, 0.95);
+  box-shadow: 0 12px 28px rgba(72, 48, 28, 0.1);
+  cursor: grab;
+}
+
+.preview-textbox.is-selected {
+  border-color: rgba(169, 49, 32, 0.5);
+  box-shadow:
+    0 0 0 1px rgba(169, 49, 32, 0.34),
+    0 12px 28px rgba(72, 48, 28, 0.12);
+  cursor: default;
+}
+
+.textbox-input {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  outline: none;
+}
+
+.textbox-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.textbox-size {
+  border: 1px solid rgba(86, 60, 44, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--ink);
+  padding: 2px 4px;
+  font-size: 0.78rem;
+}
+
+.textbox-delete {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid rgba(169, 49, 32, 0.5);
+  background: #fff8f4;
+  color: var(--stamp);
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.textbox-readonly {
+  color: var(--ink);
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.textbox-empty {
+  color: var(--ink-soft);
+}
+
 .preview-stamp-object {
   --stamp-scale-x: 1;
   --stamp-scale-y: 1;

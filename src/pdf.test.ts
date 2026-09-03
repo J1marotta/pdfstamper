@@ -222,4 +222,47 @@ describe('exportFilledPdf', () => {
     expect(exportedPages[1]?.getWidth()).toBe(612);
     expect(exportedPages[1]?.getHeight()).toBe(792);
   });
+
+  it('draws text boxes into the exported document and skips empty ones', async () => {
+    const { exportFilledPdf } = await import('./pdf');
+    const source = await PDFDocument.create();
+    source.addPage([595, 842]);
+    const sourceBytes = new Uint8Array(await source.save());
+    const pages: DocumentPageModel[] = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+
+    const blob = await exportFilledPdf(
+      sourceBytes,
+      [],
+      makeStamp({
+        placement: {
+          pageId: null,
+          x: 0.5,
+          y: 0.5,
+          width: 260,
+          rotation: 0,
+        },
+      }),
+      pages,
+      [
+        { id: 'text-1', pageId: 'pdf-1', x: 0.5, y: 0.5, text: 'Received 20 May 2026', fontSize: 12 },
+        { id: 'text-2', pageId: 'pdf-1', x: 0.2, y: 0.2, text: '   ', fontSize: 12 },
+        { id: 'text-3', pageId: 'missing-page', x: 0.5, y: 0.5, text: 'Nowhere', fontSize: 12 },
+      ],
+    );
+    const header = await blob.slice(0, 8).text();
+    const exported = await PDFDocument.load(await blob.arrayBuffer());
+
+    expect(blob.type).toBe('application/pdf');
+    expect(header).toContain('%PDF-');
+    expect(exported.getPageCount()).toBe(1);
+  });
 });

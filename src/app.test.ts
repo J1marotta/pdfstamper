@@ -1343,4 +1343,70 @@ describe('PdfStampStudio shell', () => {
 
     localStorage.clear();
   });
+
+  it('adds, edits, drag-selects, and deletes a text box on the current page', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        textBoxes: Array<{ id: string; pageId: string; x: number; y: number; text: string; fontSize: number }>;
+        selectedTextBoxId: string | null;
+        lastExportUrl: string | null;
+        lastExportName: string | null;
+      };
+      renderControlState: () => void;
+      renderPreviewMeta: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'scan.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    internalStudio.state.lastExportUrl = 'blob:stale-export';
+    internalStudio.state.lastExportName = 'scan-stamped.pdf';
+    internalStudio.renderControlState();
+    internalStudio.renderPreviewMeta();
+
+    expect(document.querySelector('#preview-textboxes')).not.toBeNull();
+
+    const addButton = document.querySelector('[data-action="add-textbox"]') as HTMLButtonElement | null;
+    expect(addButton).not.toBeNull();
+    addButton!.click();
+
+    expect(internalStudio.state.textBoxes).toHaveLength(1);
+    expect(internalStudio.state.textBoxes[0]?.pageId).toBe('pdf-1');
+
+    const textInput = document.querySelector('.textbox-input') as HTMLInputElement | null;
+    expect(textInput).not.toBeNull();
+
+    textInput!.value = 'Received 20 May 2026';
+    textInput!.dispatchEvent(new Event('input', { bubbles: true }));
+
+    expect(internalStudio.state.textBoxes[0]?.text).toBe('Received 20 May 2026');
+    expect(internalStudio.state.lastExportUrl).toBeNull();
+
+    const deleteButton = document.querySelector('[data-action="delete-textbox"]') as HTMLButtonElement | null;
+    expect(deleteButton).not.toBeNull();
+    deleteButton!.click();
+
+    expect(internalStudio.state.textBoxes).toHaveLength(0);
+    expect(document.querySelector('.textbox-input')).toBeNull();
+  });
 });

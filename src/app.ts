@@ -22,6 +22,7 @@ import type {
   FillStats,
   PageSize,
   PdfFieldModel,
+  PlacedTextBox,
   ProfileValues,
   SemanticKey,
   StampPlacement,
@@ -56,6 +57,8 @@ interface AppState {
   exportConfirmArmed: boolean;
   passwordDialog: { fileName: string; error: string } | null;
   encryptedReadOnly: boolean;
+  textBoxes: PlacedTextBox[];
+  selectedTextBoxId: string | null;
 }
 
 interface AppElements {
@@ -65,6 +68,7 @@ interface AppElements {
   uploadButton: HTMLButtonElement;
   addBlankPageButton: HTMLButtonElement;
   deletePageButton: HTMLButtonElement;
+  addTextBoxButton: HTMLButtonElement;
   exportActions: HTMLElement;
   status: HTMLElement;
   stampControls: HTMLElement;
@@ -77,6 +81,7 @@ interface AppElements {
   previewEmpty: HTMLElement;
   previewHint: HTMLElement;
   previewStamp: HTMLElement;
+  previewTextboxes: HTMLElement;
   previewGuides: HTMLElement;
   previewPageLabel: HTMLElement;
   previewFileMeta: HTMLElement;
@@ -135,6 +140,15 @@ interface StampInteraction {
   startHeightPx: number;
 }
 
+interface TextBoxInteraction {
+  boxId: string;
+  startClientX: number;
+  startClientY: number;
+  startX: number;
+  startY: number;
+  stageRect: DOMRect;
+}
+
 const EMPTY_STATS: FillStats = {
   autofilledCount: 0,
   remainingCount: 0,
@@ -149,6 +163,9 @@ const STAMP_PREVIEW_IMAGE_HEIGHT = 184;
 const STAMP_PREVIEW_GAP = 10;
 const STAMP_MIN_RESIZE_RATIO = 0.01;
 const STAMP_SNAP_THRESHOLD = 0.02;
+
+const TEXTBOX_FONT_SIZES = [8, 10, 12, 14, 18, 24];
+const DEFAULT_TEXTBOX_FONT_SIZE = 12;
 
 type PdfModule = typeof import('./pdf');
 
@@ -169,7 +186,9 @@ export class PdfStampStudio {
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
   private stampInteraction: StampInteraction | null = null;
+  private textBoxInteraction: TextBoxInteraction | null = null;
   private suppressNextPreviewClick = false;
+  private textBoxSerial = 0;
 
   constructor(root: HTMLElement) {
     this.root = root;
@@ -181,6 +200,7 @@ export class PdfStampStudio {
       uploadButton: this.root.querySelector<HTMLButtonElement>('#upload-button')!,
       addBlankPageButton: this.root.querySelector<HTMLButtonElement>('#add-blank-page-button')!,
       deletePageButton: this.root.querySelector<HTMLButtonElement>('#delete-page-button')!,
+      addTextBoxButton: this.root.querySelector<HTMLButtonElement>('#add-textbox-button')!,
       exportActions: this.root.querySelector<HTMLElement>('#export-actions')!,
       status: this.root.querySelector<HTMLElement>('#status')!,
       stampControls: this.root.querySelector<HTMLElement>('#stamp-controls')!,
@@ -193,6 +213,7 @@ export class PdfStampStudio {
       previewEmpty: this.root.querySelector<HTMLElement>('#preview-empty')!,
       previewHint: this.root.querySelector<HTMLElement>('#preview-hint')!,
       previewStamp: this.root.querySelector<HTMLElement>('#preview-stamp')!,
+      previewTextboxes: this.root.querySelector<HTMLElement>('#preview-textboxes')!,
       previewGuides: this.root.querySelector<HTMLElement>('#preview-guides')!,
       previewPageLabel: this.root.querySelector<HTMLElement>('#preview-page-label')!,
       previewFileMeta: this.root.querySelector<HTMLElement>('#preview-file-meta')!,
@@ -231,6 +252,8 @@ export class PdfStampStudio {
       exportConfirmArmed: false,
       passwordDialog: null,
       encryptedReadOnly: false,
+      textBoxes: [],
+      selectedTextBoxId: null,
     };
 
     const savedPreferences = loadPreferences();
@@ -271,6 +294,19 @@ export class PdfStampStudio {
 
       if (action === 'delete-page') {
         this.deleteCurrentPage();
+        return;
+      }
+
+      if (action === 'add-textbox') {
+        this.addTextBox();
+        return;
+      }
+
+      if (action === 'delete-textbox') {
+        const boxId = target.closest<HTMLElement>('[data-textbox-id]')?.dataset.textboxId;
+        if (boxId) {
+          this.deleteTextBox(boxId);
+        }
         return;
       }
 
@@ -399,7 +435,7 @@ export class PdfStampStudio {
         return;
       }
 
-      if (target.closest('#preview-stamp')) {
+      if (target.closest('#preview-stamp, #preview-textboxes')) {
         return;
       }
 
@@ -538,6 +574,99 @@ export class PdfStampStudio {
       window.addEventListener('pointermove', this.onPointerMove);
       window.addEventListener('pointerup', this.onPointerUp);
       window.addEventListener('pointercancel', this.onPointerUp);
+    });
+
+    this.elements.previewTextboxes.addEventListener('click', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      const boxId = target.closest<HTMLElement>('[data-textbox-id]')?.dataset.textboxId;
+      if (!boxId) {
+        return;
+      }
+
+      this.state.selectedTextBoxId = boxId;
+      this.renderPreviewTextboxes();
+    });
+
+    const onTextBoxEdit = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+        return;
+      }
+
+      const boxId = target.closest<HTMLElement>('[data-textbox-id]')?.dataset.textboxId;
+      if (!boxId) {
+        return;
+      }
+
+      if (target instanceof HTMLInputElement) {
+        const nextText = target.value;
+        this.state.textBoxes = this.state.textBoxes.map((box) =>
+          box.id === boxId ? { ...box, text: nextText } : box,
+        );
+        this.invalidateLastExport();
+        return;
+      }
+
+      const nextSize = Number(target.value);
+      if (!TEXTBOX_FONT_SIZES.includes(nextSize)) {
+        return;
+      }
+
+      this.state.textBoxes = this.state.textBoxes.map((box) =>
+        box.id === boxId ? { ...box, fontSize: nextSize } : box,
+      );
+      this.invalidateLastExport();
+      this.renderPreviewTextboxes();
+    };
+
+    this.elements.previewTextboxes.addEventListener('input', onTextBoxEdit);
+    this.elements.previewTextboxes.addEventListener('change', onTextBoxEdit);
+
+    this.elements.previewTextboxes.addEventListener('pointerdown', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+
+      if (!this.state.bundle) {
+        return;
+      }
+
+      const boxId = target.closest<HTMLElement>('[data-textbox-id]')?.dataset.textboxId;
+      if (!boxId) {
+        return;
+      }
+
+      if (target.closest('input, select, textarea, button')) {
+        return;
+      }
+
+      const box = this.state.textBoxes.find((candidate) => candidate.id === boxId);
+      const stageRect = this.getPreviewStageRect();
+      if (!box || !stageRect) {
+        return;
+      }
+
+      this.state.selectedTextBoxId = boxId;
+      this.renderPreviewTextboxes();
+
+      event.preventDefault();
+      this.textBoxInteraction = {
+        boxId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: box.x,
+        startY: box.y,
+        stageRect,
+      };
+
+      window.addEventListener('pointermove', this.onTextBoxPointerMove);
+      window.addEventListener('pointerup', this.onTextBoxPointerUp);
+      window.addEventListener('pointercancel', this.onTextBoxPointerUp);
     });
 
     this.elements.stampControls.addEventListener('input', (event) => {
@@ -857,6 +986,38 @@ export class PdfStampStudio {
     this.renderPreviewStamp();
   };
 
+  private readonly onTextBoxPointerMove = (event: PointerEvent): void => {
+    const interaction = this.textBoxInteraction;
+    if (!interaction) {
+      return;
+    }
+
+    const deltaX = (event.clientX - interaction.startClientX) / interaction.stageRect.width;
+    const deltaY = (event.clientY - interaction.startClientY) / interaction.stageRect.height;
+    const nextX = clampValue(interaction.startX + deltaX, 0, 1);
+    const nextY = clampValue(interaction.startY + deltaY, 0, 1);
+    this.state.textBoxes = this.state.textBoxes.map((box) =>
+      box.id === interaction.boxId ? { ...box, x: nextX, y: nextY } : box,
+    );
+    this.invalidateLastExport();
+    this.renderPreviewTextboxes();
+  };
+
+  private readonly onTextBoxPointerUp = (): void => {
+    if (this.textBoxInteraction) {
+      this.suppressNextPreviewClick = true;
+      window.setTimeout(() => {
+        this.suppressNextPreviewClick = false;
+      }, 0);
+    }
+
+    this.textBoxInteraction = null;
+    window.removeEventListener('pointermove', this.onTextBoxPointerMove);
+    window.removeEventListener('pointerup', this.onTextBoxPointerUp);
+    window.removeEventListener('pointercancel', this.onTextBoxPointerUp);
+    this.renderPreviewTextboxes();
+  };
+
   private updatePlacementFromPixels(
     centerXPx: number,
     centerYPx: number,
@@ -943,6 +1104,8 @@ export class PdfStampStudio {
         date: seededProfile.date || this.state.stamp.date || todayInputValue(),
       });
       this.state.stampSelected = false;
+      this.state.textBoxes = [];
+      this.state.selectedTextBoxId = null;
 
       this.state.passwordDialog = null;
       this.pendingPasswordFile = null;
@@ -1066,6 +1229,7 @@ export class PdfStampStudio {
     }));
     const stamp = cloneStampSettings(this.state.stamp);
     const pages = this.state.pages.map((page) => ({ ...page }));
+    const textBoxes = this.state.textBoxes.map((box) => ({ ...box }));
 
     try {
       const { exportFilledPdf } = await getPdfModule();
@@ -1075,7 +1239,7 @@ export class PdfStampStudio {
       this.renderControlState();
       this.renderExportPanel();
 
-      const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages);
+      const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages, textBoxes);
       this.setLastExport(blob, outputName);
       const truncatedExport = shouldShowStampTable(stamp, Boolean(stamp.imageBytes))
         ? buildStampRows(stamp).filter((row) =>
@@ -1164,6 +1328,48 @@ export class PdfStampStudio {
     this.renderStatus();
   }
 
+  private addTextBox(): void {
+    const currentPage = this.getCurrentPage();
+    if (!this.state.bundle || !currentPage) {
+      return;
+    }
+
+    this.textBoxSerial += 1;
+    const box: PlacedTextBox = {
+      id: `text-${Date.now()}-${this.textBoxSerial}`,
+      pageId: currentPage.id,
+      x: 0.5,
+      y: 0.5,
+      text: '',
+      fontSize: DEFAULT_TEXTBOX_FONT_SIZE,
+    };
+
+    this.state.textBoxes = [...this.state.textBoxes, box];
+    this.state.selectedTextBoxId = box.id;
+    this.invalidateLastExport();
+    this.renderPreviewTextboxes();
+    this.setNotice('Text box added. Type into it, then drag it where it belongs.', 'neutral');
+    this.renderStatus();
+    this.elements.previewTextboxes
+      .querySelector<HTMLInputElement>(`[data-textbox-id="${escapeSelector(box.id)}"] input`)
+      ?.focus({ preventScroll: true });
+  }
+
+  private deleteTextBox(boxId: string): void {
+    if (!this.state.textBoxes.some((box) => box.id === boxId)) {
+      return;
+    }
+
+    this.state.textBoxes = this.state.textBoxes.filter((box) => box.id !== boxId);
+    if (this.state.selectedTextBoxId === boxId) {
+      this.state.selectedTextBoxId = null;
+    }
+    this.invalidateLastExport();
+    this.renderPreviewTextboxes();
+    this.setNotice('Text box removed.', 'neutral');
+    this.renderStatus();
+  }
+
   private async downloadLastExport(): Promise<void> {
     if (!this.state.lastExportBlob || !this.state.lastExportName || !this.state.lastExportUrl) {
       return;
@@ -1218,10 +1424,15 @@ export class PdfStampStudio {
     const nextIndex = Math.min(currentIndex, remainingPages.length - 1);
     const removedLabel = pageToRemove.kind === 'blank' ? 'Blank page' : `Page ${pageToRemove.pageNumber}`;
     const removedStamp = this.state.stamp.placement.pageId === pageToRemove.id;
+    const removedTextBoxes = this.state.textBoxes.filter((box) => box.pageId === pageToRemove.id);
 
     this.state.pages = remainingPages;
     this.state.previewPageId = remainingPages[nextIndex]?.id ?? null;
     this.state.stampSelected = false;
+    this.state.textBoxes = this.state.textBoxes.filter((box) => box.pageId !== pageToRemove.id);
+    if (this.state.selectedTextBoxId && removedTextBoxes.some((box) => box.id === this.state.selectedTextBoxId)) {
+      this.state.selectedTextBoxId = null;
+    }
     if (removedStamp) {
       this.state.stamp = {
         ...this.state.stamp,
@@ -1314,6 +1525,7 @@ export class PdfStampStudio {
     this.renderChromeVisibility();
     this.elements.uploadButton.disabled = this.state.loadingPdf;
     this.elements.addBlankPageButton.disabled = !this.state.bundle || this.state.loadingPdf;
+    this.elements.addTextBoxButton.disabled = !this.state.bundle || this.state.loadingPdf;
     this.elements.deletePageButton.disabled =
       !this.state.bundle || this.state.loadingPdf || this.state.pages.length <= 1 || this.getCurrentPageIndex() === -1;
     const currentIndex = this.getCurrentPageIndex();
@@ -1590,6 +1802,8 @@ export class PdfStampStudio {
       this.elements.previewEmpty.hidden = false;
       this.elements.previewCanvas.hidden = true;
       this.elements.previewStamp.hidden = true;
+      this.elements.previewTextboxes.hidden = true;
+      this.elements.previewTextboxes.innerHTML = '';
       this.elements.previewGuides.hidden = true;
       this.elements.previewHint.hidden = true;
       this.elements.previewFrame.classList.add('is-empty');
@@ -1605,6 +1819,7 @@ export class PdfStampStudio {
     this.elements.previewEmpty.hidden = true;
     this.elements.previewFrame.classList.remove('is-empty');
     this.renderPreviewStamp();
+    this.renderPreviewTextboxes();
   }
 
   private async renderPreview(): Promise<void> {
@@ -1652,6 +1867,7 @@ export class PdfStampStudio {
       this.elements.previewFrame.classList.add('has-preview');
       this.syncPreviewOverlayFrame();
       this.renderPreviewStamp();
+      this.renderPreviewTextboxes();
     } catch (error) {
       console.error(error);
       if (renderToken !== this.previewToken) {
@@ -1669,8 +1885,46 @@ export class PdfStampStudio {
     }
   }
 
-  private renderPreviewStamp(): void {
+  private renderPreviewTextboxes(): void {
     const currentPage = this.getCurrentPage();
+    if (!currentPage) {
+      this.elements.previewTextboxes.hidden = true;
+      this.elements.previewTextboxes.innerHTML = '';
+      return;
+    }
+
+    const boxes = this.state.textBoxes.filter((box) => box.pageId === currentPage.id);
+    if (boxes.length === 0) {
+      this.elements.previewTextboxes.hidden = true;
+      this.elements.previewTextboxes.innerHTML = '';
+      return;
+    }
+
+    const stageRect = this.getPreviewStageRect();
+    const scale = stageRect && currentPage.width > 0 ? stageRect.width / currentPage.width : 1;
+    this.elements.previewTextboxes.hidden = false;
+    this.updateContainerMarkup(this.elements.previewTextboxes, boxes.map((box) => {
+      const selected = box.id === this.state.selectedTextBoxId;
+      const fontPx = Math.max(6, box.fontSize * scale);
+      const sizes = TEXTBOX_FONT_SIZES.map((size) =>
+        `<option value="${size}" ${size === box.fontSize ? 'selected' : ''}>${size}pt</option>`,
+      ).join('');
+      const safeId = escapeAttribute(box.id);
+      return `
+        <div class="preview-textbox${selected ? ' is-selected' : ''}" data-textbox-id="${safeId}" style="left:${box.x * 100}%; top:${box.y * 100}%;">
+          ${selected
+            ? `<input class="textbox-input" data-textbox-id="${safeId}" type="text" value="${escapeAttribute(box.text)}" placeholder="Type text…" style="font-size:${fontPx}px;" />
+              <span class="textbox-tools">
+                <select class="textbox-size" data-textbox-id="${safeId}" aria-label="Text size">${sizes}</select>
+                <button type="button" class="textbox-delete" data-action="delete-textbox" data-textbox-id="${safeId}" aria-label="Delete text box">×</button>
+              </span>`
+            : `<div class="textbox-readonly" data-textbox-id="${safeId}" style="font-size:${fontPx}px;">${box.text.trim() ? escapeHtml(box.text) : '<span class="textbox-empty">Empty text box</span>'}</div>`}
+        </div>
+      `;
+    }).join(''));
+  }
+
+  private renderPreviewStamp(): void {    const currentPage = this.getCurrentPage();
     if (!currentPage || !shouldShowStampOnPage(this.state.stamp, currentPage.id)) {
       this.elements.previewStamp.hidden = true;
       this.elements.previewGuides.hidden = true;
@@ -1785,6 +2039,7 @@ export class PdfStampStudio {
     };
 
     Object.assign(this.elements.previewStamp.style, style);
+    Object.assign(this.elements.previewTextboxes.style, style);
     Object.assign(this.elements.previewGuides.style, style);
   }
 
@@ -1794,6 +2049,11 @@ export class PdfStampStudio {
     this.elements.previewStamp.style.width = '';
     this.elements.previewStamp.style.height = '';
     this.elements.previewStamp.style.inset = '';
+    this.elements.previewTextboxes.style.left = '';
+    this.elements.previewTextboxes.style.top = '';
+    this.elements.previewTextboxes.style.width = '';
+    this.elements.previewTextboxes.style.height = '';
+    this.elements.previewTextboxes.style.inset = '';
     this.elements.previewGuides.style.left = '';
     this.elements.previewGuides.style.top = '';
     this.elements.previewGuides.style.width = '';
@@ -1978,6 +2238,7 @@ function shellMarkup(): string {
         <div class="topbar-actions">
           <button id="upload-button" class="ghost-button" type="button" data-action="choose-file">Upload PDF</button>
           <button id="add-blank-page-button" class="ghost-button" type="button" data-action="add-blank-page">Add blank page</button>
+          <button id="add-textbox-button" class="ghost-button" type="button" data-action="add-textbox">Add text box</button>
           <button id="delete-page-button" class="ghost-button" type="button" data-action="delete-page">Delete page</button>
           <div class="topbar-page-nav">
             <button id="prev-page-button" class="nav-button" type="button">Prev</button>
@@ -2018,6 +2279,7 @@ function shellMarkup(): string {
               <div class="preview-guide is-horizontal"></div>
             </div>
             <div id="preview-stamp" class="preview-stamp" hidden></div>
+            <div id="preview-textboxes" class="preview-textboxes" hidden></div>
             <div id="preview-hint" class="preview-hint" hidden></div>
           </div>
           <div id="stamp-controls" class="floating-inspector"></div>
@@ -2586,6 +2848,11 @@ function selectorForElement(element: HTMLElement): string | null {
   const stampKey = element.dataset.stampKey;
   if (stampKey) {
     return `[data-stamp-key="${escapeSelector(stampKey)}"]`;
+  }
+
+  const textBoxId = element.dataset.textboxId;
+  if (textBoxId) {
+    return `[data-textbox-id="${escapeSelector(textBoxId)}"] input`;
   }
 
   const stampSetting = element.dataset.stampSetting;

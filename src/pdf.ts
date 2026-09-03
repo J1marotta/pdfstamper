@@ -18,7 +18,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { humanizeFieldName, inferSemanticKey } from './heuristics';
 import { buildStampRows, displayStampRowValue, isStampPlaced, shouldShowStampImage, shouldShowStampTable, wrapStampText } from './stamp';
-import type { DocumentPageModel, PageSize, PdfFieldModel, StampSettings } from './types';
+import type { DocumentPageModel, PageSize, PdfFieldModel, PlacedTextBox, StampSettings } from './types';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -142,6 +142,7 @@ export async function exportFilledPdf(
   fields: PdfFieldModel[],
   stamp: StampSettings,
   pages: DocumentPageModel[],
+  textBoxes: PlacedTextBox[] = [],
 ): Promise<Blob> {
   const document = await PDFDocument.load(sourceBytes, {
     ignoreEncryption: true,
@@ -208,6 +209,8 @@ export async function exportFilledPdf(
       drawStamp(targetPage, stamp, boldFont, regularFont, embeddedImage);
     }
   }
+
+  drawTextBoxes(pageMap, textBoxes, regularFont);
 
   const bytes = await document.save();
   const pdfBuffer = new ArrayBuffer(bytes.byteLength);
@@ -480,6 +483,42 @@ function clampPdfCenter(value: number, min: number, max: number, extent: number)
   }
 
   return clampValue(value, min, max);
+}
+
+function drawTextBoxes(
+  pageMap: Map<string, PDFPage>,
+  textBoxes: PlacedTextBox[],
+  font: PDFFont,
+): void {
+  const margin = 18;
+
+  for (const box of textBoxes) {
+    const targetPage = pageMap.get(box.pageId);
+    const text = box.text.trim();
+    if (!targetPage || !text) {
+      continue;
+    }
+
+    try {
+      const size = clampValue(box.fontSize, 4, 96);
+      const pageWidth = targetPage.getWidth();
+      const pageHeight = targetPage.getHeight();
+      const textWidth = font.widthOfTextAtSize(text, size);
+      const centerX = pageWidth * box.x;
+      const centerY = pageHeight * (1 - box.y);
+      const x = clampValue(centerX - textWidth / 2, margin, Math.max(margin, pageWidth - textWidth - margin));
+      const y = clampValue(centerY - size * 0.35, margin, Math.max(margin, pageHeight - margin));
+      targetPage.drawText(text, {
+        x,
+        y,
+        size,
+        font,
+        color: INK,
+      });
+    } catch {
+      // Unsupported glyphs for the embedded font: skip the box, keep the export.
+    }
+  }
 }
 
 function buildPdfStampRows(stamp: StampSettings): Array<{

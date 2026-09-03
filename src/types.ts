@@ -95,8 +95,18 @@ export interface BlankPageModel {
 
 export type DocumentPageModel = PdfPageModel | BlankPageModel;
 
-export interface StampSettings {
-  mode: 'text' | 'image' | 'both';
+export interface PlacedTextBox {
+  id: string;
+  pageId: string;
+  /** Normalized 0..1 center, CSS top-down coordinates. */
+  x: number;
+  y: number;
+  text: string;
+  /** Font size in PDF points. */
+  fontSize: number;
+}
+
+export interface StampSettings {  mode: 'text' | 'image' | 'both';
   payee: string;
   totalAmount: string;
   gstAmount: string;
