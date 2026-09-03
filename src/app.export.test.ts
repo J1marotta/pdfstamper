@@ -55,6 +55,9 @@ describe('PdfStampStudio export flow', () => {
         previewPageId: string | null;
         loadingPdf: boolean;
         exporting: boolean;
+        exportConfirmArmed: boolean;
+        stats: { autofilledCount: number; remainingCount: number; editableCount: number; matchedCount: number };
+        notice: { tone: string; message: string };
       };
       handleExport: () => Promise<void>;
       downloadLastExport: () => Promise<void>;
@@ -145,5 +148,28 @@ describe('PdfStampStudio export flow', () => {
     expect(showSaveFilePicker).toHaveBeenCalledTimes(1);
     expect(write).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks for confirmation on first export while fields still need attention', async () => {
+    const internalStudio = await seedReadyStudio();
+    internalStudio.state.stats = {
+      autofilledCount: 0,
+      remainingCount: 2,
+      editableCount: 2,
+      matchedCount: 1,
+    };
+
+    await internalStudio.handleExport();
+
+    expect(exportFilledPdf).not.toHaveBeenCalled();
+    expect(internalStudio.state.exportConfirmArmed).toBe(true);
+    expect(internalStudio.state.notice.tone).toBe('warning');
+    expect(internalStudio.state.notice.message).toContain('2 fields still need attention');
+    expect(document.querySelector('#export-actions')?.textContent).toContain('Confirm export');
+
+    await internalStudio.handleExport();
+
+    expect(exportFilledPdf).toHaveBeenCalledTimes(1);
+    expect(internalStudio.state.exportConfirmArmed).toBe(false);
   });
 });

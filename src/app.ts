@@ -53,6 +53,7 @@ interface AppState {
   lastExportBlob: Blob | null;
   advancedOpen: boolean;
   blankInsertMode: 'after-current' | 'at-end';
+  exportConfirmArmed: boolean;
 }
 
 interface AppElements {
@@ -200,6 +201,7 @@ export class PdfStampStudio {
       lastExportBlob: null,
       advancedOpen: false,
       blankInsertMode: 'after-current',
+      exportConfirmArmed: false,
     };
 
     this.bindEvents();
@@ -829,6 +831,7 @@ export class PdfStampStudio {
     }
 
     this.clearLastExport();
+    this.state.exportConfirmArmed = false;
     this.state.loadingPdf = true;
     this.setNotice('Loading the PDF locally and building the page surface…', 'busy');
     this.renderStatus();
@@ -936,6 +939,21 @@ export class PdfStampStudio {
     if (!this.state.bundle || this.state.loadingPdf || this.state.exporting) {
       return;
     }
+
+    // Two-step export when fields still need attention: first click warns,
+    // second click confirms. Any edit disarms via invalidateLastExport.
+    if (this.state.stats.remainingCount > 0 && !this.state.exportConfirmArmed) {
+      this.state.exportConfirmArmed = true;
+      const count = this.state.stats.remainingCount;
+      this.setNotice(
+        `${count} field${count === 1 ? '' : 's'} still need${count === 1 ? 's' : ''} attention in Document Fields. Click ${this.state.lastExportUrl ? 'Regenerate' : 'Generate stamped PDF'} again to export anyway.`,
+        'warning',
+      );
+      this.renderStatus();
+      this.renderExportPanel();
+      return;
+    }
+    this.state.exportConfirmArmed = false;
 
     const sourceBytes = this.state.bundle.sourceBytes;
     const outputName = outputFileName(this.state.bundle.fileName);
@@ -1409,6 +1427,7 @@ export class PdfStampStudio {
   private renderExportPanel(): void {
     const nextOutputName = this.state.bundle ? outputFileName(this.state.bundle.fileName) : 'your-file-stamped.pdf';
     const disabled = !this.state.bundle || this.state.loadingPdf || this.state.exporting;
+    const armed = this.state.exportConfirmArmed && this.state.stats.remainingCount > 0;
     const primaryAction =
       this.state.lastExportUrl && this.state.lastExportName
         ? `
@@ -1416,12 +1435,12 @@ export class PdfStampStudio {
             Download stamped PDF
           </button>
           <button type="button" class="ghost-button" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-            Regenerate
+            ${armed ? 'Confirm regenerate' : 'Regenerate'}
           </button>
         `
         : `
           <button type="button" class="action-button is-primary" data-action="export-pdf" ${disabled ? 'disabled' : ''}>
-            ${this.state.exporting ? 'Working…' : 'Generate stamped PDF'}
+            ${this.state.exporting ? 'Working…' : armed ? 'Confirm export' : 'Generate stamped PDF'}
           </button>
         `;
 
@@ -1671,6 +1690,7 @@ export class PdfStampStudio {
   }
 
   private invalidateLastExport(): void {
+    this.state.exportConfirmArmed = false;
     if (!this.state.lastExportUrl) {
       return;
     }
