@@ -1237,4 +1237,61 @@ describe('PdfStampStudio shell', () => {
 
     expect(document.querySelector('.inspector-warning')).toBeNull();
   });
+
+  it('shows a password dialog and clears it on cancel', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        passwordDialog: { fileName: string; error: string } | null;
+        notice: { tone: string; message: string };
+      };
+      renderPasswordDialog: () => void;
+    };
+
+    expect(document.querySelector('#password-dialog')?.textContent).toBe('');
+
+    internalStudio.state.passwordDialog = { fileName: 'locked.pdf', error: '' };
+    internalStudio.renderPasswordDialog();
+
+    expect(document.querySelector('#password-input')).not.toBeNull();
+    expect(document.querySelector('#password-dialog')?.textContent).toContain('locked.pdf');
+
+    const cancelButton = document.querySelector('[data-action="cancel-password"]') as HTMLButtonElement | null;
+    expect(cancelButton).not.toBeNull();
+    cancelButton!.click();
+
+    expect(internalStudio.state.passwordDialog).toBeNull();
+    expect(document.querySelector('#password-input')).toBeNull();
+    expect(document.querySelector('#status')?.textContent).toContain('Password entry cancelled.');
+  });
+
+  it('disables export actions for encrypted documents', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        encryptedReadOnly: boolean;
+      };
+      renderExportPanel: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'locked.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.encryptedReadOnly = true;
+    internalStudio.renderExportPanel();
+
+    const generateButton = document.querySelector('[data-action="export-pdf"]') as HTMLButtonElement | null;
+    expect(generateButton).not.toBeNull();
+    expect(generateButton?.disabled).toBe(true);
+  });
 });

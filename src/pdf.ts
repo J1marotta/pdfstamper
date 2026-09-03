@@ -32,6 +32,7 @@ export interface LoadedPdfBundle {
   pageSizes: PageSize[];
   textDigest: string;
   fields: PdfFieldModel[];
+  encrypted: boolean;
 }
 
 const STAMP_RED = rgb(0.66, 0.13, 0.1);
@@ -42,7 +43,22 @@ const STAMP_EXPORT_BASE_WIDTH = 460;
 const STAMP_EXPORT_IMAGE_HEIGHT = 160;
 const STAMP_EXPORT_GAP = 10;
 
-export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
+export function isPasswordException(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { name?: unknown }).name === 'PasswordException'
+  );
+}
+
+export function isIncorrectPassword(error: unknown): boolean {
+  return (
+    isPasswordException(error) &&
+    (error as { code?: unknown }).code === 2
+  );
+}
+
+export async function loadPdfBundle(file: File, password?: string): Promise<LoadedPdfBundle> {
   const rawBuffer = await file.arrayBuffer();
   const { sourceBytes, editableBytes, previewBytes } = clonePdfBytesForWorkflows(rawBuffer);
   const [editableDocument, previewDocument] = await Promise.all([
@@ -50,10 +66,13 @@ export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
       ignoreEncryption: true,
       updateMetadata: false,
     }),
-    getDocument({ data: previewBytes }).promise,
+    getDocument({ data: previewBytes, password }).promise,
   ]);
 
-  const fields = extractFields(editableDocument);
+  const encrypted = editableDocument.isEncrypted;
+  // Field values in an encrypted document cannot be decrypted by the local
+  // engine, so skip detection rather than seeding the profile with garbage.
+  const fields = encrypted ? [] : extractFields(editableDocument);
   const pageCount = previewDocument.numPages;
   const pageSizes = editableDocument.getPages().map((page) => ({
     width: page.getWidth(),
@@ -69,6 +88,7 @@ export async function loadPdfBundle(file: File): Promise<LoadedPdfBundle> {
     pageSizes,
     textDigest,
     fields,
+    encrypted,
   };
 }
 

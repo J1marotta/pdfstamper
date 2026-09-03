@@ -45,6 +45,20 @@ function makeStamp(overrides: Partial<StampSettings> = {}): StampSettings {
   };
 }
 
+describe('password errors', () => {
+  it('recognises pdf.js password exceptions and wrong-password codes', async () => {
+    const { isIncorrectPassword, isPasswordException } = await import('./pdf');
+
+    expect(isPasswordException({ name: 'PasswordException', code: 1 })).toBe(true);
+    expect(isPasswordException({ name: 'PasswordException', code: 2 })).toBe(true);
+    expect(isPasswordException(new Error('boom'))).toBe(false);
+    expect(isPasswordException(null)).toBe(false);
+    expect(isIncorrectPassword({ name: 'PasswordException', code: 2 })).toBe(true);
+    expect(isIncorrectPassword({ name: 'PasswordException', code: 1 })).toBe(false);
+    expect(isIncorrectPassword(new Error('boom'))).toBe(false);
+  });
+});
+
 describe('exportFilledPdf', () => {
   it('keeps export bytes independent from preview bytes', async () => {
     const { clonePdfBytesForWorkflows } = await import('./pdf');

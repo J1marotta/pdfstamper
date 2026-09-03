@@ -54,6 +54,8 @@ interface AppState {
   advancedOpen: boolean;
   blankInsertMode: 'after-current' | 'at-end';
   exportConfirmArmed: boolean;
+  passwordDialog: { fileName: string; error: string } | null;
+  encryptedReadOnly: boolean;
 }
 
 interface AppElements {
@@ -82,6 +84,7 @@ interface AppElements {
   nextPageButton: HTMLButtonElement;
   thumbnailRail: HTMLElement;
   advancedSheet: HTMLElement;
+  passwordDialog: HTMLElement;
 }
 
 interface ReapplyRenderOptions {
@@ -140,6 +143,7 @@ export class PdfStampStudio {
   private state: AppState;
   private previewToken = 0;
   private previewRenderChain: Promise<void> = Promise.resolve();
+  private pendingPasswordFile: File | null = null;
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
   private stampInteraction: StampInteraction | null = null;
@@ -174,6 +178,7 @@ export class PdfStampStudio {
       nextPageButton: this.root.querySelector<HTMLButtonElement>('#next-page-button')!,
       thumbnailRail: this.root.querySelector<HTMLElement>('#thumbnail-rail')!,
       advancedSheet: this.root.querySelector<HTMLElement>('#advanced-sheet')!,
+      passwordDialog: this.root.querySelector<HTMLElement>('#password-dialog')!,
     };
 
     this.state = {
@@ -202,6 +207,8 @@ export class PdfStampStudio {
       advancedOpen: false,
       blankInsertMode: 'after-current',
       exportConfirmArmed: false,
+      passwordDialog: null,
+      encryptedReadOnly: false,
     };
 
     this.bindEvents();
@@ -278,6 +285,16 @@ export class PdfStampStudio {
       if (action === 'delete-stamp') {
         this.deleteStamp();
       }
+
+      if (action === 'submit-password') {
+        this.submitPassword();
+        return;
+      }
+
+      if (action === 'cancel-password') {
+        this.cancelPassword('Password entry cancelled.');
+        return;
+      }
     });
 
     this.elements.fileInput.addEventListener('change', (event) => {
@@ -287,6 +304,17 @@ export class PdfStampStudio {
         void this.handlePdf(file);
       }
       target.value = '';
+    });
+
+    this.elements.passwordDialog.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') {
+        return;
+      }
+
+      const target = event.target;
+      if (target instanceof HTMLInputElement && target.type === 'password') {
+        this.submitPassword();
+      }
     });
 
     this.elements.previewFrame.addEventListener('dragover', (event) => {
@@ -669,9 +697,15 @@ export class PdfStampStudio {
     });
 
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape' && this.state.advancedOpen) {
-        this.state.advancedOpen = false;
-        this.renderAdvancedSheetVisibility();
+      if (event.key === 'Escape') {
+        if (this.state.passwordDialog) {
+          this.cancelPassword('Password entry cancelled.');
+          return;
+        }
+        if (this.state.advancedOpen) {
+          this.state.advancedOpen = false;
+          this.renderAdvancedSheetVisibility();
+        }
       }
     });
   }
@@ -823,7 +857,7 @@ export class PdfStampStudio {
     this.invalidateLastExport();
   }
 
-  private async handlePdf(file: File): Promise<void> {
+  private async handlePdf(file: File, password?: string): Promise<void> {
     if (!file.name.toLowerCase().endsWith('.pdf')) {
       this.setNotice('Use a PDF file for this workflow.', 'error');
       this.renderStatus();
@@ -842,7 +876,7 @@ export class PdfStampStudio {
     try {
       await this.releasePreviewDocument();
       const { loadPdfBundle } = await getPdfModule();
-      const bundle = await loadPdfBundle(file);
+      const bundle = await loadPdfBundle(file, password);
       const seededValues = seedProfileValues(bundle.fields);
       const seededProfile: ProfileValues = {
         ...seededValues,
@@ -872,24 +906,49 @@ export class PdfStampStudio {
       });
       this.state.stampSelected = false;
 
+      this.state.passwordDialog = null;
+      this.pendingPasswordFile = null;
+      this.state.encryptedReadOnly = bundle.encrypted;
+      this.renderPasswordDialog();
+
       this.reapplyProfile();
       this.renderThumbnailRail();
       this.renderStampControls();
       this.renderPreviewMeta();
       await this.renderPreview();
 
-      this.setNotice(
-        `Ready. ${bundle.pageCount} page${bundle.pageCount === 1 ? '' : 's'} loaded. Click on the page to place your stamp.`,
-        'success',
-      );
+      if (bundle.encrypted) {
+        this.setNotice(
+          `Password accepted. ${bundle.pageCount} page${bundle.pageCount === 1 ? '' : 's'} unlocked for preview, but export is disabled for encrypted PDFs.`,
+          'warning',
+        );
+      } else {
+        this.setNotice(
+          `Ready. ${bundle.pageCount} page${bundle.pageCount === 1 ? '' : 's'} loaded. Click on the page to place your stamp.`,
+          'success',
+        );
+      }
     } catch (error) {
       console.error(error);
+      const { isIncorrectPassword, isPasswordException } = await getPdfModule();
+      if (isPasswordException(error)) {
+        this.pendingPasswordFile = file;
+        this.state.passwordDialog = {
+          fileName: file.name,
+          error: isIncorrectPassword(error) ? 'That password was not accepted. Try again.' : '',
+        };
+        this.setNotice('This PDF is password protected. Enter the document password.', 'neutral');
+        this.renderPasswordDialog();
+        this.renderStatus();
+        return;
+      }
       this.state.bundle = null;
       this.state.pages = [];
       this.state.fields = [];
       this.state.stats = EMPTY_STATS;
       this.state.previewPageId = null;
       this.state.stampSelected = false;
+      this.state.encryptedReadOnly = false;
       this.setNotice(
         'The PDF could not be parsed. Password-protected or malformed files need a separate handling path.',
         'error',
@@ -937,6 +996,12 @@ export class PdfStampStudio {
 
   private async handleExport(): Promise<void> {
     if (!this.state.bundle || this.state.loadingPdf || this.state.exporting) {
+      return;
+    }
+
+    if (this.state.encryptedReadOnly) {
+      this.setNotice('Export is disabled for encrypted PDFs. The local engine cannot safely rewrite them.', 'error');
+      this.renderStatus();
       return;
     }
 
@@ -1033,6 +1098,31 @@ export class PdfStampStudio {
     this.renderPreviewMeta();
     void this.renderPreview();
     this.setNotice('Blank page added. Click anywhere on it if you want to move the stamp there.', 'neutral');
+    this.renderStatus();
+  }
+
+  private submitPassword(): void {
+    const file = this.pendingPasswordFile;
+    if (!file) {
+      this.cancelPassword('Password entry cancelled.');
+      return;
+    }
+
+    const password = this.elements.passwordDialog.querySelector<HTMLInputElement>('#password-input')?.value ?? '';
+    if (!password) {
+      this.state.passwordDialog = { fileName: file.name, error: 'Enter the document password.' };
+      this.renderPasswordDialog();
+      return;
+    }
+
+    void this.handlePdf(file, password);
+  }
+
+  private cancelPassword(message: string): void {
+    this.pendingPasswordFile = null;
+    this.state.passwordDialog = null;
+    this.renderPasswordDialog();
+    this.setNotice(message, 'neutral');
     this.renderStatus();
   }
 
@@ -1175,6 +1265,7 @@ export class PdfStampStudio {
     this.renderProfileFields();
     this.renderFieldList();
     this.renderFillStats();
+    this.renderPasswordDialog();
     this.renderStampControls();
     this.renderExportPanel();
     this.renderPreviewMeta();
@@ -1426,7 +1517,7 @@ export class PdfStampStudio {
 
   private renderExportPanel(): void {
     const nextOutputName = this.state.bundle ? outputFileName(this.state.bundle.fileName) : 'your-file-stamped.pdf';
-    const disabled = !this.state.bundle || this.state.loadingPdf || this.state.exporting;
+    const disabled = !this.state.bundle || this.state.loadingPdf || this.state.exporting || this.state.encryptedReadOnly;
     const armed = this.state.exportConfirmArmed && this.state.stats.remainingCount > 0;
     const primaryAction =
       this.state.lastExportUrl && this.state.lastExportName
@@ -1470,7 +1561,8 @@ export class PdfStampStudio {
     const pageIndex = this.getCurrentPageIndex();
     const label = currentPage.kind === 'blank' ? 'Blank page' : `Page ${currentPage.pageNumber}`;
     this.elements.previewPageLabel.textContent = `${label} ${pageIndex + 1} / ${this.state.pages.length}`;
-    this.elements.previewFileMeta.textContent = `${this.state.bundle.fileName} · ${this.state.bundle.pageCount} source page${this.state.bundle.pageCount === 1 ? '' : 's'}`;
+    const encryptedSuffix = this.state.encryptedReadOnly ? ' · encrypted (export disabled)' : '';
+    this.elements.previewFileMeta.textContent = `${this.state.bundle.fileName} · ${this.state.bundle.pageCount} source page${this.state.bundle.pageCount === 1 ? '' : 's'}${encryptedSuffix}`;
     this.elements.previewEmpty.hidden = true;
     this.elements.previewFrame.classList.remove('is-empty');
     this.renderPreviewStamp();
@@ -1600,6 +1692,34 @@ export class PdfStampStudio {
 
   private renderAdvancedSheetVisibility(): void {
     this.elements.advancedSheet.hidden = !this.state.bundle || !this.state.advancedOpen;
+  }
+
+  private renderPasswordDialog(): void {
+    const dialog = this.state.passwordDialog;
+    if (!dialog) {
+      this.updateContainerMarkup(this.elements.passwordDialog, '');
+      return;
+    }
+
+    this.updateContainerMarkup(this.elements.passwordDialog, `
+      <div class="password-overlay">
+        <div class="password-card" role="dialog" aria-modal="true" aria-label="Document password">
+          <p class="eyebrow">Protected PDF</p>
+          <h2>Enter the document password</h2>
+          <p>${escapeHtml(dialog.fileName)} is password protected. The password stays in this tab and is never uploaded.</p>
+          ${dialog.error ? `<p class="password-error">${escapeHtml(dialog.error)}</p>` : ''}
+          <label class="inspector-field">
+            <span>Password</span>
+            <input id="password-input" type="password" autocomplete="off" />
+          </label>
+          <div class="inspector-actions">
+            <button type="button" class="action-button is-primary" data-action="submit-password">Unlock</button>
+            <button type="button" class="ghost-button" data-action="cancel-password">Cancel</button>
+          </div>
+        </div>
+      </div>
+    `);
+    this.elements.passwordDialog.querySelector<HTMLInputElement>('#password-input')?.focus({ preventScroll: true });
   }
 
   private syncPreviewOverlayFrame(): void {
@@ -1867,6 +1987,8 @@ function shellMarkup(): string {
           </div>
         </div>
       </section>
+
+      <div id="password-dialog"></div>
     </div>
   `;
 }
