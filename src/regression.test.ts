@@ -6,6 +6,7 @@ import { buildStampRows } from './stamp';
 type InternalStudio = {
   state: any;
   stampInteraction: any;
+  stampImageUrls: Map<string, string>;
   suppressNextPreviewClick: boolean;
   renderControlState: () => void;
   renderStampControls: () => void;
@@ -58,21 +59,43 @@ function singlePageState(internal: InternalStudio, placementOverrides: any = {})
     { id: 'pdf-1', kind: 'pdf', pageNumber: 1, width: 595, height: 842, label: 'Page 1' },
   ];
   internal.state.previewPageId = 'pdf-1';
-  internal.state.stampSelected = true;
-  internal.state.stamp = {
-    ...internal.state.stamp,
-    placement: {
-      pageId: 'pdf-1',
-      x: 0.5,
-      y: 0.5,
-      width: 300,
-      rotation: 0,
-      ...placementOverrides,
+  internal.state.stamps = [
+    {
+      id: 'stamp-1',
+      settings: {
+        mode: 'text',
+        payee: '',
+        totalAmount: '',
+        gstAmount: '',
+        movementNumber: '',
+        signedBy: '',
+        coSignedBy: '',
+        approvedBy1: '',
+        approvedBy2: '',
+        date: '2026-05-20',
+        placement: {
+          pageId: 'pdf-1',
+          x: 0.5,
+          y: 0.5,
+          width: 300,
+          rotation: 0,
+          ...placementOverrides,
+        },
+        flatten: false,
+        imageBytes: null,
+        imageMime: null,
+        imageName: null,
+      },
     },
-  };
+  ];
+  internal.state.selectedStampId = 'stamp-1';
   internal.renderControlState();
   internal.renderPreviewMeta();
   internal.renderPreviewStamp();
+}
+
+function selectedPlacement(internal: InternalStudio): any {
+  return internal.state.stamps[0]?.settings.placement;
 }
 
 describe('regression: recently-fixed behaviors', () => {
@@ -83,11 +106,11 @@ describe('regression: recently-fixed behaviors', () => {
 
   it('includes a date row and shows an editable date input in the selected preview', () => {
     const { internal } = setupStudio();
-    const rows = buildStampRows(internal.state.stamp);
-    expect(rows.map((row) => row.key)).toContain('date');
-
     singlePageState(internal, { y: 0.7 });
     stubCanvasRect();
+
+    const rows = buildStampRows(internal.state.stamps[0].settings);
+    expect(rows.map((row) => row.key)).toContain('date');
 
     const dateInput = document.querySelector(
       '#preview-stamp input[data-stamp-key="date"]',
@@ -104,11 +127,29 @@ describe('regression: recently-fixed behaviors', () => {
       { id: 'pdf-2', kind: 'pdf', pageNumber: 2, width: 595, height: 842, label: 'Page 2' },
     ];
     internal.state.previewPageId = 'pdf-2';
-    internal.state.stampSelected = true;
-    internal.state.stamp = {
-      ...internal.state.stamp,
-      placement: { pageId: 'pdf-1', x: 0.2, y: 0.2, width: 260, height: 120, rotation: 45 },
-    };
+    internal.state.stamps = [
+      {
+        id: 'stamp-1',
+        settings: {
+          mode: 'text',
+          payee: '',
+          totalAmount: '',
+          gstAmount: '',
+          movementNumber: '',
+          signedBy: '',
+          coSignedBy: '',
+          approvedBy1: '',
+          approvedBy2: '',
+          date: '2026-05-20',
+          placement: { pageId: 'pdf-1', x: 0.2, y: 0.2, width: 260, height: 120, rotation: 45 },
+          flatten: false,
+          imageBytes: null,
+          imageMime: null,
+          imageName: null,
+        },
+      },
+    ];
+    internal.state.selectedStampId = 'stamp-1';
     internal.renderControlState();
     internal.renderThumbnailRail();
     internal.renderPreviewMeta();
@@ -123,10 +164,10 @@ describe('regression: recently-fixed behaviors', () => {
       }),
     );
 
-    expect(internal.state.stamp.placement.pageId).toBe('pdf-2');
-    expect(internal.state.stamp.placement.rotation).toBe(45);
-    expect(internal.state.stamp.placement.height).toBe(120);
-    expect(internal.state.stamp.placement.width).toBe(260);
+    expect(selectedPlacement(internal).pageId).toBe('pdf-2');
+    expect(selectedPlacement(internal).rotation).toBe(45);
+    expect(selectedPlacement(internal).height).toBe(120);
+    expect(selectedPlacement(internal).width).toBe(260);
 
     const activeThumb = document.querySelector('[data-page-id="pdf-2"] .thumb-stamp-flag');
     const staleThumb = document.querySelector('[data-page-id="pdf-1"] .thumb-stamp-flag');
@@ -155,15 +196,20 @@ describe('regression: recently-fixed behaviors', () => {
       }),
     );
 
-    expect(internal.state.stamp.placement.width).toBeGreaterThan(300);
-    expect(internal.state.stamp.placement.height).toBeUndefined();
+    expect(selectedPlacement(internal).width).toBeGreaterThan(300);
+    expect(selectedPlacement(internal).height).toBeUndefined();
     window.dispatchEvent(new Event('pointerup'));
 
     // N/S resize keeps the original width.
-    internal.state.stamp = {
-      ...internal.state.stamp,
-      placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 300, height: 160, rotation: 0 },
-    };
+    internal.state.stamps = [
+      {
+        ...internal.state.stamps[0],
+        settings: {
+          ...internal.state.stamps[0].settings,
+          placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 300, height: 160, rotation: 0 },
+        },
+      },
+    ];
     internal.renderPreviewStamp();
     stubStampBodySize(302.5, 152);
 
@@ -181,8 +227,8 @@ describe('regression: recently-fixed behaviors', () => {
       }),
     );
 
-    expect(internal.state.stamp.placement.width).toBeCloseTo(300, 5);
-    expect(internal.state.stamp.placement.height).toBeGreaterThan(160);
+    expect(selectedPlacement(internal).width).toBeCloseTo(300, 5);
+    expect(selectedPlacement(internal).height).toBeGreaterThan(160);
     window.dispatchEvent(new Event('pointerup'));
   });
 
@@ -207,7 +253,7 @@ describe('regression: recently-fixed behaviors', () => {
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(internal.suppressNextPreviewClick).toBe(false);
 
-    const before = { ...internal.state.stamp.placement };
+    const before = { ...selectedPlacement(internal) };
     const previewFrame = document.querySelector('#preview-frame') as HTMLElement;
     previewFrame.dispatchEvent(
       Object.assign(new Event('click', { bubbles: true, cancelable: true }), {
@@ -216,9 +262,9 @@ describe('regression: recently-fixed behaviors', () => {
       }),
     );
 
-    expect(internal.state.stamp.placement.pageId).toBe('pdf-1');
+    expect(selectedPlacement(internal).pageId).toBe('pdf-1');
     expect(
-      internal.state.stamp.placement.x !== before.x || internal.state.stamp.placement.y !== before.y,
+      selectedPlacement(internal).x !== before.x || selectedPlacement(internal).y !== before.y,
     ).toBe(true);
   });
 
@@ -245,14 +291,30 @@ describe('regression: recently-fixed behaviors', () => {
       { id: 'pdf-1', kind: 'pdf', pageNumber: 1, width: 595, height: 842, label: 'Page 1' },
     ];
     internal.state.previewPageId = 'pdf-1';
-    internal.state.stampImageUrl = 'blob:fake-image';
-    internal.state.stamp = {
-      ...internal.state.stamp,
-      mode: 'image',
-      imageName: 'seal.png',
-      imageBytes: new Uint8Array([1, 2, 3]),
-      imageMime: 'image/png',
-    };
+    internal.state.stamps = [
+      {
+        id: 'stamp-1',
+        settings: {
+          mode: 'image',
+          payee: '',
+          totalAmount: '',
+          gstAmount: '',
+          movementNumber: '',
+          signedBy: '',
+          coSignedBy: '',
+          approvedBy1: '',
+          approvedBy2: '',
+          date: '2026-05-20',
+          placement: { pageId: 'pdf-1', x: 0.5, y: 0.7, width: 300, rotation: 0 },
+          flatten: false,
+          imageBytes: new Uint8Array([1, 2, 3]),
+          imageMime: 'image/png',
+          imageName: 'seal.png',
+        },
+      },
+    ];
+    internal.state.selectedStampId = 'stamp-1';
+    internal.stampImageUrls.set('stamp-1', 'blob:fake-image');
     internal.renderStampControls();
     internal.renderPreviewMeta();
 
@@ -262,9 +324,9 @@ describe('regression: recently-fixed behaviors', () => {
     expect(clearButton).not.toBeNull();
     clearButton!.click();
 
-    expect(internal.state.stamp.mode).toBe('text');
-    expect(internal.state.stampImageUrl).toBeNull();
-    expect(internal.state.stamp.imageName).toBeNull();
+    expect(internal.state.stamps[0].settings.mode).toBe('text');
+    expect(internal.stampImageUrls.has('stamp-1')).toBe(false);
+    expect(internal.state.stamps[0].settings.imageName).toBeNull();
   });
 
   it('escapes a hostile field id in data-field-id markup', () => {
@@ -356,7 +418,7 @@ describe('regression: recently-fixed behaviors', () => {
     dateInput.value = '2026-06-15';
     dateInput.dispatchEvent(new Event('input', { bubbles: true }));
 
-    expect(internal.state.stamp.date).toBe('2026-06-15');
+    expect(internal.state.stamps[0].settings.date).toBe('2026-06-15');
     expect(document.querySelector('input[data-stamp-setting="date"]')).toBe(before);
 
     const previewDateInput = document.querySelector(

@@ -5,6 +5,67 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { PdfStampStudio } from './app';
 
+type TestStampSettings = {
+  mode?: string;
+  payee?: string;
+  totalAmount?: string;
+  imageName?: string | null;
+  imageBytes?: Uint8Array | null;
+  imageMime?: string | null;
+  placement?: {
+    pageId: string | null;
+    x: number;
+    y: number;
+    width: number;
+    height?: number;
+    rotation: number;
+  };
+};
+
+type TestStudio = {
+  state: {
+    stamps: any;
+    selectedStampId: any;
+  };
+};
+
+function seedStamp(studio: TestStudio, patch: TestStampSettings = {}, selected = true): void {
+  studio.state.stamps = [
+    {
+      id: 'stamp-1',
+      settings: {
+        mode: 'text',
+        payee: '',
+        totalAmount: '',
+        gstAmount: '',
+        movementNumber: '',
+        signedBy: '',
+        coSignedBy: '',
+        approvedBy1: '',
+        approvedBy2: '',
+        date: '2026-05-20',
+        placement: {
+          pageId: 'pdf-1',
+          x: 0.5,
+          y: 0.7,
+          width: 300,
+          rotation: 0,
+        },
+        flatten: false,
+        imageBytes: null,
+        imageMime: null,
+        imageName: null,
+        ...patch,
+      },
+    },
+  ];
+  studio.state.selectedStampId = selected ? 'stamp-1' : null;
+}
+
+function selectedSettings(studio: TestStudio): any {
+  return studio.state.stamps[0]?.settings;
+}
+
 describe('PdfStampStudio shell', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -52,12 +113,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
-        stamp: {
-          payee: string;
-          totalAmount: string;
-          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
-        };
+        stamps: any;
+        selectedStampId: any;
       };
       renderPreviewMeta: () => void;
       renderPreviewStamp: () => void;
@@ -78,9 +135,7 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = false;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       payee: 'Acme Pty Ltd',
       totalAmount: '$100.00',
       placement: {
@@ -90,7 +145,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    }, false);
 
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -214,7 +269,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -240,9 +296,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -250,7 +305,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -302,7 +357,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -328,9 +384,7 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = false;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -338,7 +392,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    }, false);
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -369,7 +423,7 @@ describe('PdfStampStudio shell', () => {
     });
     stampBody!.dispatchEvent(pointerDown);
 
-    expect(internalStudio.state.stampSelected).toBe(true);
+    expect(internalStudio.state.selectedStampId).toBe('stamp-1');
     expect(internalStudio.stampInteraction?.kind).toBe('drag');
   });
 
@@ -384,7 +438,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -409,9 +464,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -419,7 +473,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 90,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -461,7 +515,7 @@ describe('PdfStampStudio shell', () => {
     });
     window.dispatchEvent(pointerMove);
 
-    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
+    expect(selectedSettings(internalStudio).placement.width).toBeGreaterThan(300);
 
     window.dispatchEvent(new Event('pointerup'));
   });
@@ -477,7 +531,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; height?: number; rotation: number };
         };
@@ -502,9 +557,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -513,7 +567,7 @@ describe('PdfStampStudio shell', () => {
         height: 160,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -550,13 +604,12 @@ describe('PdfStampStudio shell', () => {
       clientY: 520,
     }));
 
-    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
-    expect(internalStudio.state.stamp.placement.height).toBeCloseTo(160, 1);
+    expect(selectedSettings(internalStudio).placement.width).toBeGreaterThan(300);
+    expect(selectedSettings(internalStudio).placement.height).toBeCloseTo(160, 1);
 
     window.dispatchEvent(new Event('pointerup'));
 
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -565,7 +618,7 @@ describe('PdfStampStudio shell', () => {
         height: 160,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderPreviewStamp();
 
     const nextStampBody = document.querySelector('.preview-stamp-body') as HTMLElement | null;
@@ -584,8 +637,8 @@ describe('PdfStampStudio shell', () => {
       clientY: 552,
     }));
 
-    expect(internalStudio.state.stamp.placement.width).toBeGreaterThan(300);
-    expect(internalStudio.state.stamp.placement.height).toBeGreaterThan(160);
+    expect(selectedSettings(internalStudio).placement.width).toBeGreaterThan(300);
+    expect(selectedSettings(internalStudio).placement.height).toBeGreaterThan(160);
 
     window.dispatchEvent(new Event('pointerup'));
   });
@@ -601,7 +654,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -626,9 +680,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -636,7 +689,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -674,7 +727,7 @@ describe('PdfStampStudio shell', () => {
       clientY: 400,
     }));
 
-    expect(internalStudio.state.stamp.placement.width).toBeCloseTo(12);
+    expect(selectedSettings(internalStudio).placement.width).toBeCloseTo(12);
 
     window.dispatchEvent(new Event('pointerup'));
   });
@@ -690,7 +743,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -715,9 +769,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -725,7 +778,7 @@ describe('PdfStampStudio shell', () => {
         width: 12,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderPreviewMeta();
     internalStudio.renderPreviewStamp();
@@ -749,7 +802,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           mode: 'text' | 'image' | 'both';
           imageName: string | null;
@@ -778,9 +832,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       mode: 'text',
       imageName: null,
       placement: {
@@ -790,7 +843,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderStampControls();
     internalStudio.renderPreviewMeta();
@@ -799,8 +852,8 @@ describe('PdfStampStudio shell', () => {
     const file = new File([new Uint8Array([137, 80, 78, 71])], 'seal.png', { type: 'image/png' });
     await internalStudio.handleStampImage(file);
 
-    expect(internalStudio.state.stamp.mode).toBe('both');
-    expect(internalStudio.state.stamp.imageName).toBe('seal.png');
+    expect(selectedSettings(internalStudio).mode).toBe('both');
+    expect(selectedSettings(internalStudio).imageName).toBe('seal.png');
     expect(document.querySelector('#stamp-controls')?.textContent).toContain('Using seal.png.');
     expect(document.querySelector('.preview-stamp-image')).not.toBeNull();
   });
@@ -843,7 +896,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
         };
@@ -880,9 +934,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -890,7 +943,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderThumbnailRail();
     internalStudio.renderStampControls();
@@ -906,8 +959,8 @@ describe('PdfStampStudio shell', () => {
 
     expect(internalStudio.state.pages.map((page) => page.id)).toEqual(['pdf-2']);
     expect(internalStudio.state.previewPageId).toBe('pdf-2');
-    expect(internalStudio.state.stamp.placement.pageId).toBeNull();
-    expect(status?.textContent).toContain('The stamp was removed with it.');
+    expect(selectedSettings(internalStudio).placement.pageId).toBeNull();
+    expect(status?.textContent).toContain('1 stamp moved off it.');
     expect(deleteButton?.disabled).toBe(true);
   });
 
@@ -922,10 +975,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
-        stamp: {
-          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
-        };
+        stamps: any;
+        selectedStampId: any;
       };
       renderControlState: () => void;
       renderThumbnailRail: () => void;
@@ -949,9 +1000,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       placement: {
         pageId: 'pdf-1',
         x: 0.5,
@@ -959,7 +1009,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderControlState();
     internalStudio.renderThumbnailRail();
     internalStudio.renderStampControls();
@@ -974,7 +1024,8 @@ describe('PdfStampStudio shell', () => {
 
     deleteStampButton!.click();
 
-    expect(internalStudio.state.stamp.placement.pageId).toBeNull();
+    expect(internalStudio.state.stamps).toHaveLength(0);
+    expect(internalStudio.state.selectedStampId).toBeNull();
     expect(previewStamp?.hidden).toBe(true);
     expect(document.querySelector('.thumb-stamp-flag')).toBeNull();
     expect(document.querySelector('[data-action="delete-stamp"]')).toBeNull();
@@ -1014,7 +1065,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         stamp: {
           payee: string;
           placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
@@ -1039,9 +1091,8 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    internalStudio.state.selectedStampId = 'stamp-1';
+    seedStamp(internalStudio, {
       payee: 'Acme Pty Ltd',
       placement: {
         pageId: 'pdf-1',
@@ -1050,7 +1101,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
 
     const previewCanvas = document.querySelector('#preview-canvas') as HTMLCanvasElement | null;
     expect(previewCanvas).not.toBeNull();
@@ -1085,7 +1136,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stampSelected: boolean;
+        stamps: any;
+        selectedStampId: any;
         lastExportUrl: string | null;
         lastExportName: string | null;
         stamp: {
@@ -1113,11 +1165,10 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stampSelected = true;
+    internalStudio.state.selectedStampId = 'stamp-1';
     internalStudio.state.lastExportUrl = 'blob:stale-export';
     internalStudio.state.lastExportName = 'resume-stamped.pdf';
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       payee: 'Original payee',
       placement: {
         pageId: 'pdf-1',
@@ -1126,7 +1177,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
 
     internalStudio.renderExportPanel();
     internalStudio.renderPreviewMeta();
@@ -1187,10 +1238,8 @@ describe('PdfStampStudio shell', () => {
         bundle: { fileName: string; pageCount: number } | null;
         pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
         previewPageId: string | null;
-        stamp: {
-          payee: string;
-          placement: { pageId: string | null; x: number; y: number; width: number; rotation: number };
-        };
+        stamps: any;
+        selectedStampId: any;
       };
       renderStampControls: () => void;
       renderPreviewStamp: () => void;
@@ -1211,8 +1260,7 @@ describe('PdfStampStudio shell', () => {
       },
     ];
     internalStudio.state.previewPageId = 'pdf-1';
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       payee: 'A very long payee name that cannot possibly fit on one export line at all',
       placement: {
         pageId: 'pdf-1',
@@ -1221,7 +1269,7 @@ describe('PdfStampStudio shell', () => {
         width: 300,
         rotation: 0,
       },
-    };
+    });
     internalStudio.renderStampControls();
 
     expect(document.querySelector('.inspector-warning')?.textContent).toContain('cut off on export');
@@ -1229,10 +1277,9 @@ describe('PdfStampStudio shell', () => {
     internalStudio.renderPreviewStamp();
     expect(document.querySelector('#preview-stamp .stamp-table-row.is-truncated')).not.toBeNull();
 
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       payee: 'Acme',
-    };
+    });
     internalStudio.renderStampControls();
 
     expect(document.querySelector('.inspector-warning')).toBeNull();
@@ -1305,25 +1352,27 @@ describe('PdfStampStudio shell', () => {
     const internalStudio = studio as unknown as {
       state: {
         profile: Record<string, string>;
-        stamp: Record<string, unknown>;
+        stamps: Array<{ id: string; settings: Record<string, unknown> }>;
+        selectedStampId: string | null;
         overwriteExisting: boolean;
       };
       persistPreferences: () => void;
     };
 
     internalStudio.state.profile = { fullName: 'Taylor Smith' };
-    internalStudio.state.stamp = {
-      ...internalStudio.state.stamp,
+    seedStamp(internalStudio, {
       payee: 'Acme Pty Ltd',
       imageBytes: new Uint8Array([1, 2, 3]),
-    };
+    });
     internalStudio.state.overwriteExisting = true;
     internalStudio.persistPreferences();
 
     const stored = JSON.parse(localStorage.getItem('pdf-stamp-studio:v1') ?? '{}') as Record<string, unknown>;
     expect((stored.profile as Record<string, string>).fullName).toBe('Taylor Smith');
-    expect((stored.stamp as Record<string, unknown>).payee).toBe('Acme Pty Ltd');
-    expect((stored.stamp as Record<string, unknown>).imageBytes).toBeUndefined();
+    const storedStamps = stored.stamps as Array<Record<string, unknown>>;
+    expect(storedStamps).toHaveLength(1);
+    expect(storedStamps[0]?.payee).toBe('Acme Pty Ltd');
+    expect(storedStamps[0]?.imageBytes).toBeUndefined();
 
     document.body.innerHTML = '<div id="app"></div>';
     const root2 = document.getElementById('app');
@@ -1331,21 +1380,23 @@ describe('PdfStampStudio shell', () => {
     const restored = studio2 as unknown as {
       state: {
         profile: Record<string, string>;
-        stamp: Record<string, unknown>;
+        stamps: Array<{ id: string; settings: Record<string, unknown> }>;
+        selectedStampId: string | null;
         overwriteExisting: boolean;
       };
     };
 
     expect(restored.state.profile.fullName).toBe('Taylor Smith');
-    expect(restored.state.stamp.payee).toBe('Acme Pty Ltd');
+    expect(restored.state.stamps).toHaveLength(1);
+    expect(restored.state.stamps[0]?.settings.payee).toBe('Acme Pty Ltd');
+    expect(restored.state.selectedStampId).toBeNull();
     expect(restored.state.overwriteExisting).toBe(true);
     expect((document.querySelector('#overwrite-toggle') as HTMLInputElement).checked).toBe(true);
 
     localStorage.clear();
   });
 
-  it('adds, edits, drag-selects, and deletes a text box on the current page', () => {
-    document.body.innerHTML = '<div id="app"></div>';
+  it('adds, edits, drag-selects, and deletes a text box on the current page', () => {    document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');
 
     expect(root).not.toBeNull();
@@ -1408,5 +1459,89 @@ describe('PdfStampStudio shell', () => {
 
     expect(internalStudio.state.textBoxes).toHaveLength(0);
     expect(document.querySelector('.textbox-input')).toBeNull();
+  });
+
+  it('supports several placed stamps and switches selection between them', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stamps: any;
+        selectedStampId: any;
+      };
+      renderControlState: () => void;
+      renderThumbnailRail: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'claims.pdf',
+      pageCount: 2,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+      {
+        id: 'pdf-2',
+        kind: 'pdf',
+        pageNumber: 2,
+        width: 595,
+        height: 842,
+        label: 'Page 2',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    seedStamp(internalStudio, {
+      payee: 'First stamp',
+      placement: { pageId: 'pdf-1', x: 0.3, y: 0.3, width: 260, rotation: 0 },
+    });
+    internalStudio.state.stamps = [
+      ...internalStudio.state.stamps,
+      {
+        id: 'stamp-2',
+        settings: {
+          ...selectedSettings(internalStudio),
+          payee: 'Second stamp',
+          placement: { pageId: 'pdf-1', x: 0.7, y: 0.7, width: 260, rotation: 0 },
+        },
+      },
+    ];
+    internalStudio.renderControlState();
+    internalStudio.renderThumbnailRail();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    expect(document.querySelectorAll('.preview-stamp-object')).toHaveLength(2);
+    expect(document.querySelector('.thumb-stamp-flag')?.textContent).toContain('2 stamps');
+    expect(document.querySelector('#stamp-controls')?.textContent).toContain('Stamp 1 of 2');
+
+    const secondObject = document.querySelectorAll('.preview-stamp-object')[1] as HTMLElement;
+    secondObject.dispatchEvent(new Event('click', { bubbles: true }));
+
+    expect(internalStudio.state.selectedStampId).toBe('stamp-2');
+    expect(document.querySelector('#stamp-controls')?.textContent).toContain('Stamp 2 of 2');
+
+    const secondPayee = document.querySelector(
+      '.preview-stamp-object[data-stamp-id="stamp-2"] input[data-stamp-key="payee"]',
+    ) as HTMLInputElement | null;
+    expect(secondPayee?.value).toBe('Second stamp');
+    expect(
+      document.querySelector('.preview-stamp-object[data-stamp-id="stamp-1"] input'),
+    ).toBeNull();
   });
 });

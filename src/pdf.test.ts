@@ -89,7 +89,7 @@ describe('exportFilledPdf', () => {
       },
     ];
 
-    const blob = await exportFilledPdf(sourceBytes, [], makeStamp(), pages);
+    const blob = await exportFilledPdf(sourceBytes, [], [makeStamp()], pages);
     const header = await blob.slice(0, 8).text();
 
     expect(blob.type).toBe('application/pdf');
@@ -123,7 +123,7 @@ describe('exportFilledPdf', () => {
     const blob = await exportFilledPdf(
       sourceBytes,
       [],
-      makeStamp({
+      [makeStamp({
         placement: {
           pageId: 'blank-1',
           x: 0.5,
@@ -131,7 +131,7 @@ describe('exportFilledPdf', () => {
           width: 260,
           rotation: 12,
         },
-      }),
+      })],
       pages,
     );
     const exported = await PDFDocument.load(await blob.arrayBuffer());
@@ -158,7 +158,7 @@ describe('exportFilledPdf', () => {
     const blob = await exportFilledPdf(
       sourceBytes,
       [],
-      makeStamp({
+      [makeStamp({
         placement: {
           pageId: 'pdf-1',
           x: 0.5,
@@ -167,7 +167,7 @@ describe('exportFilledPdf', () => {
           height: 80,
           rotation: 0,
         },
-      }),
+      })],
       pages,
     );
     const exported = await PDFDocument.load(await blob.arrayBuffer());
@@ -202,7 +202,7 @@ describe('exportFilledPdf', () => {
     const blob = await exportFilledPdf(
       sourceBytes,
       [],
-      makeStamp({
+      [makeStamp({
         placement: {
           pageId: 'blank-1',
           x: 0.5,
@@ -210,7 +210,7 @@ describe('exportFilledPdf', () => {
           width: 260,
           rotation: 0,
         },
-      }),
+      })],
       pages,
     );
     const exported = await PDFDocument.load(await blob.arrayBuffer());
@@ -223,8 +223,7 @@ describe('exportFilledPdf', () => {
     expect(exportedPages[1]?.getHeight()).toBe(792);
   });
 
-  it('draws text boxes into the exported document and skips empty ones', async () => {
-    const { exportFilledPdf } = await import('./pdf');
+  it('draws text boxes into the exported document and skips empty ones', async () => {    const { exportFilledPdf } = await import('./pdf');
     const source = await PDFDocument.create();
     source.addPage([595, 842]);
     const sourceBytes = new Uint8Array(await source.save());
@@ -242,7 +241,7 @@ describe('exportFilledPdf', () => {
     const blob = await exportFilledPdf(
       sourceBytes,
       [],
-      makeStamp({
+      [makeStamp({
         placement: {
           pageId: null,
           x: 0.5,
@@ -250,7 +249,7 @@ describe('exportFilledPdf', () => {
           width: 260,
           rotation: 0,
         },
-      }),
+      })],
       pages,
       [
         { id: 'text-1', pageId: 'pdf-1', x: 0.5, y: 0.5, text: 'Received 20 May 2026', fontSize: 12 },
@@ -264,5 +263,53 @@ describe('exportFilledPdf', () => {
     expect(blob.type).toBe('application/pdf');
     expect(header).toContain('%PDF-');
     expect(exported.getPageCount()).toBe(1);
+  });
+
+  it('exports multiple stamps placed on different pages', async () => {
+    const { exportFilledPdf } = await import('./pdf');
+    const source = await PDFDocument.create();
+    source.addPage([595, 842]);
+    source.addPage([595, 842]);
+    const sourceBytes = new Uint8Array(await source.save());
+    const pages: DocumentPageModel[] = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+      {
+        id: 'pdf-2',
+        kind: 'pdf',
+        pageNumber: 2,
+        width: 595,
+        height: 842,
+        label: 'Page 2',
+      },
+    ];
+
+    const blob = await exportFilledPdf(
+      sourceBytes,
+      [],
+      [
+        makeStamp({
+          payee: 'First',
+          placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 260, rotation: 0 },
+        }),
+        makeStamp({
+          payee: 'Second',
+          placement: { pageId: 'pdf-2', x: 0.3, y: 0.3, width: 200, rotation: 0 },
+        }),
+        makeStamp({
+          placement: { pageId: null, x: 0.5, y: 0.5, width: 260, rotation: 0 },
+        }),
+      ],
+      pages,
+    );
+    const exported = await PDFDocument.load(await blob.arrayBuffer());
+
+    expect(exported.getPageCount()).toBe(2);
   });
 });

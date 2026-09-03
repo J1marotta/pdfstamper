@@ -95,6 +95,11 @@ export interface BlankPageModel {
 
 export type DocumentPageModel = PdfPageModel | BlankPageModel;
 
+export interface PlacedStamp {
+  id: string;
+  settings: StampSettings;
+}
+
 export interface PlacedTextBox {
   id: string;
   pageId: string;

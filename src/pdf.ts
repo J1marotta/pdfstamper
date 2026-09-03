@@ -140,7 +140,7 @@ export async function renderPreviewPage(
 export async function exportFilledPdf(
   sourceBytes: Uint8Array,
   fields: PdfFieldModel[],
-  stamp: StampSettings,
+  stamps: StampSettings[],
   pages: DocumentPageModel[],
   textBoxes: PlacedTextBox[] = [],
 ): Promise<Blob> {
@@ -160,7 +160,7 @@ export async function exportFilledPdf(
     // Some documents ship with odd appearance streams. Export should continue.
   }
 
-  if (stamp.flatten) {
+  if (stamps.some((stamp) => stamp.flatten)) {
     try {
       form.flatten();
     } catch {
@@ -168,7 +168,6 @@ export async function exportFilledPdf(
     }
   }
 
-  const embeddedImage = await embedStampImage(document, stamp);
   const pageMap = new Map<string, PDFPage>();
   const keptSourcePageNumbers = new Set(
     pages
@@ -203,10 +202,13 @@ export async function exportFilledPdf(
     }
   });
 
-  if (isStampPlaced(stamp)) {
-    const targetPage = pageMap.get(stamp.placement.pageId!);
-    if (targetPage) {
-      drawStamp(targetPage, stamp, boldFont, regularFont, embeddedImage);
+  for (const stamp of stamps) {
+    if (isStampPlaced(stamp)) {
+      const targetPage = pageMap.get(stamp.placement.pageId!);
+      if (targetPage) {
+        const embeddedImage = await embedStampImage(document, stamp);
+        drawStamp(targetPage, stamp, boldFont, regularFont, embeddedImage);
+      }
     }
   }
 

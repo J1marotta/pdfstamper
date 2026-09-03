@@ -22,6 +22,7 @@ import type {
   FillStats,
   PageSize,
   PdfFieldModel,
+  PlacedStamp,
   PlacedTextBox,
   ProfileValues,
   SemanticKey,
@@ -41,14 +42,13 @@ interface AppState {
   profile: ProfileValues;
   activeKeys: SemanticKey[];
   stats: FillStats;
-  stamp: StampSettings;
-  stampSelected: boolean;
+  stamps: PlacedStamp[];
+  selectedStampId: string | null;
   overwriteExisting: boolean;
   previewPageId: string | null;
   notice: NoticeState;
   loadingPdf: boolean;
   exporting: boolean;
-  stampImageUrl: string | null;
   lastExportUrl: string | null;
   lastExportName: string | null;
   lastExportBlob: Blob | null;
@@ -109,19 +109,21 @@ type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
 interface PersistedPreferences {
   profile: ProfileValues;
-  stamp: Pick<
-    StampSettings,
-    | 'mode'
-    | 'payee'
-    | 'totalAmount'
-    | 'gstAmount'
-    | 'movementNumber'
-    | 'signedBy'
-    | 'coSignedBy'
-    | 'approvedBy1'
-    | 'approvedBy2'
-    | 'date'
-    | 'flatten'
+  stamps: Array<
+    Pick<
+      StampSettings,
+      | 'mode'
+      | 'payee'
+      | 'totalAmount'
+      | 'gstAmount'
+      | 'movementNumber'
+      | 'signedBy'
+      | 'coSignedBy'
+      | 'approvedBy1'
+      | 'approvedBy2'
+      | 'date'
+      | 'flatten'
+    >
   >;
   overwriteExisting: boolean;
   blankInsertMode: 'after-current' | 'at-end';
@@ -131,6 +133,7 @@ const PREFERENCES_STORAGE_KEY = 'pdf-stamp-studio:v1';
 
 interface StampInteraction {
   kind: 'drag' | 'resize' | 'rotate';
+  stampId: string;
   handle?: ResizeHandle;
   startClientX: number;
   startClientY: number;
@@ -183,8 +186,10 @@ export class PdfStampStudio {
   private previewToken = 0;
   private previewRenderChain: Promise<void> = Promise.resolve();
   private pendingPasswordFile: File | null = null;
+  private stampImageUrls = new Map<string, string>();
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
+  private stampSerial = 0;
   private stampInteraction: StampInteraction | null = null;
   private textBoxInteraction: TextBoxInteraction | null = null;
   private suppressNextPreviewClick = false;
@@ -233,8 +238,8 @@ export class PdfStampStudio {
       },
       activeKeys: ['fullName', 'email', 'phone', 'reference', 'date'],
       stats: EMPTY_STATS,
-      stamp: defaultStampSettings(),
-      stampSelected: false,
+      stamps: [],
+      selectedStampId: null,
       overwriteExisting: false,
       previewPageId: null,
       notice: {
@@ -243,7 +248,6 @@ export class PdfStampStudio {
       },
       loadingPdf: false,
       exporting: false,
-      stampImageUrl: null,
       lastExportUrl: null,
       lastExportName: null,
       lastExportBlob: null,
@@ -259,9 +263,19 @@ export class PdfStampStudio {
     const savedPreferences = loadPreferences();
     if (savedPreferences) {
       this.state.profile = { ...this.state.profile, ...savedPreferences.profile };
-      this.state.stamp = { ...this.state.stamp, ...savedPreferences.stamp };
       this.state.overwriteExisting = savedPreferences.overwriteExisting;
       this.state.blankInsertMode = savedPreferences.blankInsertMode;
+      this.state.stamps = savedPreferences.stamps.map((draft) => ({
+        id: `stamp-restored-${this.stampSerial += 1}`,
+        settings: {
+          ...defaultStampSettings(),
+          ...draft,
+          placement: { ...defaultStampSettings().placement },
+          imageBytes: null,
+          imageMime: null,
+          imageName: null,
+        },
+      }));
     }
 
     this.bindEvents();
@@ -334,12 +348,12 @@ export class PdfStampStudio {
 
       if (action === 'clear-stamp-image') {
         this.invalidateLastExport();
-        this.clearStampImage();
-        if (this.state.stamp.mode === 'image') {
+        this.clearSelectedStampImage();
+        if (this.activeStamp.mode === 'image') {
           // "Image only" with no image falls back to the table anyway, so
           // switch to text to match what is actually rendered.
-          this.state.stamp = {
-            ...this.state.stamp,
+          this.activeStamp = {
+            ...this.activeStamp,
             mode: 'text',
           };
         }
@@ -351,6 +365,12 @@ export class PdfStampStudio {
 
       if (action === 'delete-stamp') {
         this.deleteStamp();
+        return;
+      }
+
+      if (action === 'add-stamp') {
+        this.addStamp();
+        return;
       }
 
       if (action === 'submit-password') {
@@ -445,7 +465,11 @@ export class PdfStampStudio {
         return;
       }
 
-      const widthPoints = stampWidthPoints(this.state.stamp.placement.width, currentPage);
+      const selected = this.getSelectedStamp();
+      const selectedSettings = selected?.settings;
+      const widthPoints = selectedSettings
+        ? stampWidthPoints(selectedSettings.placement.width, currentPage)
+        : DEFAULT_STAMP_WIDTH_POINTS;
       const placement = placementFromPointer(
         currentPage.id,
         event.clientX,
@@ -454,16 +478,21 @@ export class PdfStampStudio {
         currentPage,
         {
           widthPoints,
-          heightPoints: this.state.stamp.placement.height,
-          baseHeight: this.getCurrentStampBaseHeight(),
-          rotation: this.state.stamp.placement.rotation,
+          heightPoints: selectedSettings?.placement.height,
+          baseHeight: this.stampBaseHeightFor(selectedSettings ?? defaultStampSettings(), selected?.id ?? null),
+          rotation: selectedSettings?.placement.rotation ?? 0,
         },
       );
-      this.state.stamp = {
-        ...this.state.stamp,
-        placement,
-      };
-      this.state.stampSelected = true;
+      if (selected) {
+        this.activeStamp = {
+          ...selected.settings,
+          placement,
+        };
+      } else {
+        const created = this.createStamp(placement);
+        this.state.stamps = [...this.state.stamps, created];
+        this.state.selectedStampId = created.id;
+      }
       this.invalidateLastExport();
       this.renderStampControls();
       this.renderThumbnailRail();
@@ -476,12 +505,14 @@ export class PdfStampStudio {
         return;
       }
 
-      if (!target.closest('.preview-stamp-object')) {
+      const stampObject = target.closest<HTMLElement>('[data-stamp-id]');
+      const stampId = stampObject?.dataset.stampId;
+      if (!stampId) {
         return;
       }
 
-      if (!this.state.stampSelected) {
-        this.state.stampSelected = true;
+      if (this.state.selectedStampId !== stampId) {
+        this.state.selectedStampId = stampId;
         this.renderStampControls();
         this.renderPreviewStamp();
       }
@@ -494,14 +525,21 @@ export class PdfStampStudio {
       }
 
       const key = target.dataset.stampKey as keyof StampSettings | undefined;
-      if (!key || !isStampValueKey(key)) {
+      const stampId = target.closest<HTMLElement>('[data-stamp-id]')?.dataset.stampId;
+      if (!key || !isStampValueKey(key) || !stampId) {
         return;
       }
 
-      this.state.stamp = {
-        ...this.state.stamp,
-        [key]: target.value,
-      };
+      const stamp = this.state.stamps.find((candidate) => candidate.id === stampId);
+      if (!stamp) {
+        return;
+      }
+
+      this.state.stamps = this.state.stamps.map((candidate) =>
+        candidate.id === stampId
+          ? { ...candidate, settings: { ...candidate.settings, [key]: target.value } }
+          : candidate,
+      );
       this.invalidateLastExport();
       this.persistPreferences();
     });
@@ -512,13 +550,13 @@ export class PdfStampStudio {
         return;
       }
 
-      if (!this.state.bundle || !isStampPlaced(this.state.stamp)) {
+      if (!this.state.bundle) {
         return;
       }
 
       const handle = target.closest<HTMLElement>('[data-stamp-handle]')?.dataset.stampHandle as ResizeHandle | undefined;
       const rotateHandle = target.closest<HTMLElement>('[data-stamp-action="rotate-stamp"]');
-      const stampCard = target.closest<HTMLElement>('.preview-stamp-object');
+      const stampCard = target.closest<HTMLElement>('[data-stamp-id]');
 
       if (!handle && !rotateHandle && target.closest('input, select, textarea, button')) {
         return;
@@ -528,31 +566,38 @@ export class PdfStampStudio {
         return;
       }
 
-      if (!this.state.stampSelected) {
-        this.state.stampSelected = true;
+      const pressedStampId = stampCard?.dataset.stampId;
+      const pressedStamp = this.state.stamps.find((stamp) => stamp.id === pressedStampId);
+      if (!pressedStamp || !isStampPlaced(pressedStamp.settings)) {
+        return;
+      }
+
+      if (this.state.selectedStampId !== pressedStamp.id) {
+        this.state.selectedStampId = pressedStamp.id;
         this.renderStampControls();
         this.renderPreviewStamp();
       }
 
       const stageRect = this.getPreviewStageRect();
-      const stampBody = this.elements.previewStamp.querySelector<HTMLElement>('.preview-stamp-body');
+      const stampBody = stampCard?.querySelector<HTMLElement>('.preview-stamp-body')
+        ?? this.elements.previewStamp.querySelector<HTMLElement>('.preview-stamp-body');
       const currentPage = this.getCurrentPage();
       if (!stageRect || !stampBody || !currentPage) {
         return;
       }
 
-      const startWidth = stampWidthPoints(this.state.stamp.placement.width, currentPage);
+      const startWidth = stampWidthPoints(pressedStamp.settings.placement.width, currentPage);
       // Normalise legacy relative widths to absolute points, but keep the
       // height untouched (it may be `undefined` for auto aspect). Forcing an
       // explicit height here would freeze the aspect and stop the stamp from
       // growing when an image is added later.
       const startPlacement = {
-        ...this.state.stamp.placement,
+        ...pressedStamp.settings.placement,
         width: startWidth,
       };
-      if (startPlacement.width !== this.state.stamp.placement.width) {
-        this.state.stamp = {
-          ...this.state.stamp,
+      if (startPlacement.width !== pressedStamp.settings.placement.width) {
+        this.activeStamp = {
+          ...pressedStamp.settings,
           placement: startPlacement,
         };
       }
@@ -562,6 +607,7 @@ export class PdfStampStudio {
         rotateHandle ? 'rotate' : handle ? 'resize' : 'drag';
       this.stampInteraction = {
         kind,
+        stampId: pressedStamp.id,
         handle,
         startClientX: event.clientX,
         startClientY: event.clientY,
@@ -685,8 +731,8 @@ export class PdfStampStudio {
           target instanceof HTMLInputElement && target.type === 'checkbox'
             ? target.checked
             : target.value;
-        this.state.stamp = {
-          ...this.state.stamp,
+        this.activeStamp = {
+          ...this.activeStamp,
           [stampSetting]: nextValue,
         };
         this.invalidateLastExport();
@@ -750,7 +796,10 @@ export class PdfStampStudio {
 
       this.invalidateLastExport();
       this.state.profile = nextProfile;
-      this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
+      this.state.stamps = this.state.stamps.map((stamp) => ({
+        ...stamp,
+        settings: syncStampFromProfile(previousProfile, nextProfile, stamp.settings),
+      }));
       this.persistPreferences();
       this.reapplyProfile({ profileFields: false });
       this.renderPreviewStamp();
@@ -796,7 +845,10 @@ export class PdfStampStudio {
           [field.semanticKey]: nextValue,
         };
         this.state.profile = nextProfile;
-        this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
+        this.state.stamps = this.state.stamps.map((stamp) => ({
+          ...stamp,
+          settings: syncStampFromProfile(previousProfile, nextProfile, stamp.settings),
+        }));
       }
 
       this.persistPreferences();
@@ -814,7 +866,7 @@ export class PdfStampStudio {
       }
 
       this.state.previewPageId = this.state.pages[currentIndex - 1]?.id ?? null;
-      this.state.stampSelected = false;
+      this.state.selectedStampId = null;
       this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
@@ -829,7 +881,7 @@ export class PdfStampStudio {
       }
 
       this.state.previewPageId = this.state.pages[currentIndex + 1]?.id ?? null;
-      this.state.stampSelected = false;
+      this.state.selectedStampId = null;
       this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
@@ -849,7 +901,7 @@ export class PdfStampStudio {
       }
 
       this.state.previewPageId = pageId;
-      this.state.stampSelected = false;
+      this.state.selectedStampId = null;
       this.renderControlState();
       this.renderStampControls();
       this.renderThumbnailRail();
@@ -879,7 +931,10 @@ export class PdfStampStudio {
 
   private readonly onPointerMove = (event: PointerEvent): void => {
     const interaction = this.stampInteraction;
-    if (!interaction || !isStampPlaced(this.state.stamp)) {
+    const dragged = interaction
+      ? this.state.stamps.find((stamp) => stamp.id === interaction.stampId)
+      : undefined;
+    if (!interaction || !dragged || !isStampPlaced(dragged.settings)) {
       return;
     }
 
@@ -893,6 +948,7 @@ export class PdfStampStudio {
       const nextCenterX = startCenterX + (event.clientX - interaction.startClientX);
       const nextCenterY = startCenterY + (event.clientY - interaction.startClientY);
       this.updatePlacementFromPixels(
+        interaction.stampId,
         nextCenterX,
         nextCenterY,
         interaction.startPlacement.width,
@@ -915,13 +971,17 @@ export class PdfStampStudio {
       const nextRotation = normalizeDegrees(
         interaction.startPlacement.rotation + ((currentAngle - startAngle) * 180) / Math.PI,
       );
-      this.state.stamp = {
-        ...this.state.stamp,
-        placement: {
-          ...this.state.stamp.placement,
-          rotation: nextRotation,
-        },
-      };
+      this.state.stamps = this.state.stamps.map((stamp) =>
+        stamp.id === interaction.stampId
+          ? {
+              ...stamp,
+              settings: {
+                ...stamp.settings,
+                placement: { ...stamp.settings.placement, rotation: nextRotation },
+              },
+            }
+          : stamp,
+      );
       this.invalidateLastExport();
       this.renderPreviewStamp();
       return;
@@ -957,6 +1017,7 @@ export class PdfStampStudio {
       ? previewPixelsToYPoints(nextSizePx.height, currentPage, stageRect)
       : interaction.startPlacement.height;
     this.updatePlacementFromPixels(
+      interaction.stampId,
       startCenterX,
       startCenterY,
       nextWidthPoints,
@@ -1018,7 +1079,65 @@ export class PdfStampStudio {
     this.renderPreviewTextboxes();
   };
 
+  private getSelectedStamp(): PlacedStamp | null {
+    if (!this.state.selectedStampId) {
+      return null;
+    }
+
+    return this.state.stamps.find((stamp) => stamp.id === this.state.selectedStampId) ?? null;
+  }
+
+  /**
+   * The selected stamp's settings. Reads fall back to a throwaway default
+   * when nothing is selected; writes are dropped in that case.
+   */
+  private get activeStamp(): StampSettings {
+    return this.getSelectedStamp()?.settings ?? defaultStampSettings();
+  }
+
+  private set activeStamp(next: StampSettings) {
+    const selected = this.getSelectedStamp();
+    if (!selected) {
+      return;
+    }
+
+    this.state.stamps = this.state.stamps.map((stamp) =>
+      stamp.id === selected.id ? { ...stamp, settings: next } : stamp,
+    );
+  }
+
+  private stampImageUrlFor(stampId: string): string | null {
+    return this.stampImageUrls.get(stampId) ?? null;
+  }
+
+  private createStamp(placement: StampPlacement): PlacedStamp {
+    this.stampSerial += 1;
+    const settings = syncStampFromProfile({}, this.state.profile, {
+      ...defaultStampSettings(),
+      placement,
+      date: this.state.profile.date || todayInputValue(),
+    });
+    return { id: `stamp-${Date.now()}-${this.stampSerial}`, settings };
+  }
+
+  private addStamp(): void {
+    if (!this.state.bundle) {
+      return;
+    }
+
+    const draft = this.createStamp({ ...defaultStampSettings().placement });
+    this.state.stamps = [...this.state.stamps, draft];
+    this.state.selectedStampId = draft.id;
+    this.invalidateLastExport();
+    this.renderStampControls();
+    this.renderPreviewStamp();
+    this.renderThumbnailRail();
+    this.setNotice('Stamp added. Click on the page to place it.', 'neutral');
+    this.renderStatus();
+  }
+
   private updatePlacementFromPixels(
+    stampId: string,
     centerXPx: number,
     centerYPx: number,
     widthPoints: number,
@@ -1042,17 +1161,25 @@ export class PdfStampStudio {
       nextY = 0.5;
     }
 
-    this.state.stamp = {
-      ...this.state.stamp,
-      placement: {
-        ...this.state.stamp.placement,
-        pageId: this.state.previewPageId,
-        x: nextX,
-        y: nextY,
-        width: widthPoints,
-        height: heightPoints,
-      },
-    };
+    const pageId = this.state.previewPageId;
+    this.state.stamps = this.state.stamps.map((stamp) =>
+      stamp.id === stampId
+        ? {
+            ...stamp,
+            settings: {
+              ...stamp.settings,
+              placement: {
+                ...stamp.settings.placement,
+                pageId,
+                x: nextX,
+                y: nextY,
+                width: widthPoints,
+                height: heightPoints,
+              },
+            },
+          }
+        : stamp,
+    );
     this.invalidateLastExport();
   }
 
@@ -1096,14 +1223,17 @@ export class PdfStampStudio {
       this.state.profile = seededProfile;
       this.state.activeKeys = activeKeys;
       this.state.previewPageId = this.state.pages[0]?.id ?? null;
-      this.state.stamp = syncStampFromProfile(previousProfile, seededProfile, {
-        ...this.state.stamp,
-        placement: {
-          ...defaultStampSettings().placement,
-        },
-        date: seededProfile.date || this.state.stamp.date || todayInputValue(),
-      });
-      this.state.stampSelected = false;
+      // New document: keep stamp content (repeat stamping workflow) but drop
+      // placements and selection; text boxes belong to the old pages.
+      this.state.stamps = this.state.stamps.map((stamp) => ({
+        ...stamp,
+        settings: syncStampFromProfile(previousProfile, seededProfile, {
+          ...stamp.settings,
+          placement: { ...stamp.settings.placement, pageId: null },
+          date: seededProfile.date || stamp.settings.date || todayInputValue(),
+        }),
+      }));
+      this.state.selectedStampId = null;
       this.state.textBoxes = [];
       this.state.selectedTextBoxId = null;
 
@@ -1148,7 +1278,7 @@ export class PdfStampStudio {
       this.state.fields = [];
       this.state.stats = EMPTY_STATS;
       this.state.previewPageId = null;
-      this.state.stampSelected = false;
+      this.state.selectedStampId = null;
       this.state.encryptedReadOnly = false;
       this.setNotice(
         'The PDF could not be parsed. Password-protected or malformed files need a separate handling path.',
@@ -1175,17 +1305,28 @@ export class PdfStampStudio {
     }
 
     this.invalidateLastExport();
-    this.clearStampImage();
-    this.state.stamp = {
-      ...this.state.stamp,
-      mode: this.state.stamp.mode === 'text' ? 'both' : this.state.stamp.mode,
+    let target = this.getSelectedStamp();
+    if (!target) {
+      const draft = this.createStamp({ ...defaultStampSettings().placement });
+      this.state.stamps = [...this.state.stamps, draft];
+      this.state.selectedStampId = draft.id;
+      target = draft;
+    }
+    this.clearSelectedStampImage();
+    this.activeStamp = {
+      ...target.settings,
+      mode: target.settings.mode === 'text' ? 'both' : target.settings.mode,
       imageBytes: new Uint8Array(await file.arrayBuffer()),
       imageMime: mime,
       imageName: file.name,
     };
-    this.state.stampImageUrl = URL.createObjectURL(file);
+    const applied = this.getSelectedStamp();
+    if (applied) {
+      this.stampImageUrls.set(applied.id, URL.createObjectURL(file));
+    }
     this.persistPreferences();
-    this.setNotice(      isStampPlaced(this.state.stamp)
+    this.setNotice(
+      applied && isStampPlaced(applied.settings)
         ? `Image added from ${file.name}.`
         : `Image added from ${file.name}. Place the stamp to preview it.`,
       'success',
@@ -1227,7 +1368,7 @@ export class PdfStampStudio {
       ...field,
       options: [...field.options],
     }));
-    const stamp = cloneStampSettings(this.state.stamp);
+    const stamps = this.state.stamps.map((stamp) => cloneStampSettings(stamp.settings));
     const pages = this.state.pages.map((page) => ({ ...page }));
     const textBoxes = this.state.textBoxes.map((box) => ({ ...box }));
 
@@ -1239,13 +1380,15 @@ export class PdfStampStudio {
       this.renderControlState();
       this.renderExportPanel();
 
-      const blob = await exportFilledPdf(sourceBytes, fields, stamp, pages, textBoxes);
+      const blob = await exportFilledPdf(sourceBytes, fields, stamps, pages, textBoxes);
       this.setLastExport(blob, outputName);
-      const truncatedExport = shouldShowStampTable(stamp, Boolean(stamp.imageBytes))
-        ? buildStampRows(stamp).filter((row) =>
-            wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated,
-          )
-        : [];
+      const truncatedExport = stamps.flatMap((stamp) =>
+        shouldShowStampTable(stamp, Boolean(stamp.imageBytes))
+          ? buildStampRows(stamp).filter((row) =>
+              wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated,
+            )
+          : [],
+      );
       if (truncatedExport.length > 0) {
         this.setNotice(
           'Stamped PDF is ready, but some stamp text was cut off. Shorten it or enlarge the stamp, then regenerate.',
@@ -1292,7 +1435,7 @@ export class PdfStampStudio {
 
     this.state.pages = nextPages;
     this.state.previewPageId = blankPage.id;
-    this.state.stampSelected = false;
+    this.state.selectedStampId = null;
     this.invalidateLastExport();
     this.renderControlState();
     this.renderThumbnailRail();
@@ -1423,24 +1566,22 @@ export class PdfStampStudio {
     const remainingPages = this.state.pages.filter((_, index) => index !== currentIndex);
     const nextIndex = Math.min(currentIndex, remainingPages.length - 1);
     const removedLabel = pageToRemove.kind === 'blank' ? 'Blank page' : `Page ${pageToRemove.pageNumber}`;
-    const removedStamp = this.state.stamp.placement.pageId === pageToRemove.id;
+    const removedStampCount = this.state.stamps.filter(
+      (stamp) => stamp.settings.placement.pageId === pageToRemove.id,
+    ).length;
     const removedTextBoxes = this.state.textBoxes.filter((box) => box.pageId === pageToRemove.id);
 
     this.state.pages = remainingPages;
     this.state.previewPageId = remainingPages[nextIndex]?.id ?? null;
-    this.state.stampSelected = false;
+    this.state.selectedStampId = null;
+    this.state.stamps = this.state.stamps.map((stamp) =>
+      stamp.settings.placement.pageId === pageToRemove.id
+        ? { ...stamp, settings: { ...stamp.settings, placement: { ...stamp.settings.placement, pageId: null } } }
+        : stamp,
+    );
     this.state.textBoxes = this.state.textBoxes.filter((box) => box.pageId !== pageToRemove.id);
     if (this.state.selectedTextBoxId && removedTextBoxes.some((box) => box.id === this.state.selectedTextBoxId)) {
       this.state.selectedTextBoxId = null;
-    }
-    if (removedStamp) {
-      this.state.stamp = {
-        ...this.state.stamp,
-        placement: {
-          ...this.state.stamp.placement,
-          pageId: null,
-        },
-      };
     }
     this.invalidateLastExport();
     this.renderControlState();
@@ -1449,8 +1590,8 @@ export class PdfStampStudio {
     this.renderPreviewMeta();
     void this.renderPreview();
     this.setNotice(
-      removedStamp
-        ? `${removedLabel} removed. The stamp was removed with it.`
+      removedStampCount > 0
+        ? `${removedLabel} removed. ${removedStampCount} stamp${removedStampCount === 1 ? '' : 's'} moved off it.`
         : `${removedLabel} removed.`,
       'neutral',
     );
@@ -1458,24 +1599,20 @@ export class PdfStampStudio {
   }
 
   private deleteStamp(): void {
-    if (!isStampPlaced(this.state.stamp)) {
+    const selected = this.getSelectedStamp();
+    if (!selected) {
       return;
     }
 
-    this.state.stamp = {
-      ...this.state.stamp,
-      placement: {
-        ...this.state.stamp.placement,
-        pageId: null,
-      },
-    };
-    this.state.stampSelected = false;
+    this.clearSelectedStampImage();
+    this.state.stamps = this.state.stamps.filter((stamp) => stamp.id !== selected.id);
+    this.state.selectedStampId = null;
     this.invalidateLastExport();
     this.renderControlState();
     this.renderThumbnailRail();
     this.renderStampControls();
     this.renderPreviewMeta();
-    this.setNotice('Stamp removed. Click anywhere on the page to place it again.', 'neutral');
+    this.setNotice('Stamp deleted.', 'neutral');
     this.renderStatus();
   }
 
@@ -1566,7 +1703,9 @@ export class PdfStampStudio {
     const items = this.state.pages
       .map((page, index) => {
         const isActive = page.id === this.state.previewPageId;
-        const hasStamp = this.state.stamp.placement.pageId === page.id;
+        const stampCount = this.state.stamps.filter(
+          (stamp) => stamp.settings.placement.pageId === page.id,
+        ).length;
         return `
           <button type="button" class="thumb ${isActive ? 'is-active' : ''}" data-page-id="${page.id}">
             <span class="thumb-paper ${page.kind === 'blank' ? 'is-blank' : ''}">
@@ -1576,7 +1715,7 @@ export class PdfStampStudio {
               <strong>${page.kind === 'blank' ? 'Blank' : `Page ${page.pageNumber}`}</strong>
               <span>${index + 1} / ${this.state.pages.length}</span>
             </span>
-            ${hasStamp ? '<span class="thumb-stamp-flag">Stamp</span>' : ''}
+            ${stampCount > 0 ? `<span class="thumb-stamp-flag">${stampCount > 1 ? `${stampCount} stamps` : 'Stamp'}</span>` : ''}
           </button>
         `;
       })
@@ -1687,7 +1826,9 @@ export class PdfStampStudio {
 
   private renderStampControls(): void {
     const bundleLoaded = Boolean(this.state.bundle);
-    const hasImage = Boolean(this.state.stampImageUrl);
+    const selected = this.getSelectedStamp();
+    const settings = selected?.settings;
+    const hasImage = selected ? this.stampImageUrls.has(selected.id) : false;
     const currentPage = this.getCurrentPage();
     const side = this.getInspectorSide();
     const truncatedKeys = bundleLoaded ? this.stampTruncation() : [];
@@ -1697,22 +1838,47 @@ export class PdfStampStudio {
         <div class="inspector-copy">
           <p class="eyebrow">Stamp</p>
           <h2>Keep the page in the middle.</h2>
-          <p>Upload a PDF and place one approval stamp exactly where it needs to land.</p>
+          <p>Upload a PDF and place approval stamps exactly where they need to land.</p>
         </div>
       `);
       return;
     }
 
+    if (!selected || !settings) {
+      this.updateContainerMarkup(this.elements.stampControls, `
+        <div class="inspector-copy">
+          <p class="eyebrow">Stamp</p>
+          <h2>No stamp selected.</h2>
+          <p>Add a stamp, then click on the page to place it. Click any placed stamp to edit it.</p>
+        </div>
+        <div class="inspector-controls">
+          <label class="inspector-field">
+            <span>Blank page placement</span>
+            <select data-ui-setting="blank-insert-mode">
+              ${selectOption('after-current', 'After current page', this.state.blankInsertMode)}
+              ${selectOption('at-end', 'Append to end', this.state.blankInsertMode)}
+            </select>
+          </label>
+          <div class="inspector-actions">
+            <button type="button" class="ghost-button" data-action="add-stamp">Add stamp</button>
+            <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
+          </div>
+        </div>
+      `);
+      return;
+    }
+
+    const stampCount = this.state.stamps.length;
     const placementCopy = currentPage
-      ? isStampPlaced(this.state.stamp) && this.state.stamp.placement.pageId === currentPage.id
+      ? isStampPlaced(settings) && settings.placement.pageId === currentPage.id
         ? 'Drag to move. Pull the edges or corners to resize. Use the top handle to rotate.'
         : 'Click anywhere on this page to place or move the stamp here.'
       : 'Choose a page, then click to place the stamp.';
 
     this.updateContainerMarkup(this.elements.stampControls, `
       <div class="inspector-copy">
-        <p class="eyebrow">Stamp</p>
-        <h2>${this.state.stampSelected ? 'Direct on-page editing.' : 'One stamp, placed by eye.'}</h2>
+        <p class="eyebrow">Stamp${stampCount > 1 ? ` ${this.state.stamps.findIndex((stamp) => stamp.id === selected.id) + 1} of ${stampCount}` : ''}</p>
+        <h2>Direct on-page editing.</h2>
         <p>${escapeHtml(placementCopy)}</p>
         ${truncatedKeys.length > 0 ? '<p class="inspector-warning">Some stamp text will be cut off on export. Shorten it or enlarge the stamp.</p>' : ''}
       </div>
@@ -1720,14 +1886,14 @@ export class PdfStampStudio {
         <label class="inspector-field">
           <span>Mode</span>
           <select data-stamp-setting="mode">
-            ${selectOption('text', 'Approval block', this.state.stamp.mode)}
-            ${selectOption('image', 'Image only', this.state.stamp.mode)}
-            ${selectOption('both', 'Block + image', this.state.stamp.mode)}
+            ${selectOption('text', 'Approval block', settings.mode)}
+            ${selectOption('image', 'Image only', settings.mode)}
+            ${selectOption('both', 'Block + image', settings.mode)}
           </select>
         </label>
         <label class="inspector-field">
           <span>Stamp date</span>
-          <input data-stamp-setting="date" type="date" value="${escapeAttribute(this.state.stamp.date)}" />
+          <input data-stamp-setting="date" type="date" value="${escapeAttribute(settings.date)}" />
         </label>
         <label class="inspector-field">
           <span>Blank page placement</span>
@@ -1740,22 +1906,19 @@ export class PdfStampStudio {
           <span>Optional image stamp</span>
           <input type="file" accept="image/png,image/jpeg" />
           <small>${
-            hasImage && this.state.stamp.imageName
-              ? `Using ${escapeHtml(this.state.stamp.imageName)}.`
+            hasImage && settings.imageName
+              ? `Using ${escapeHtml(settings.imageName)}.`
               : 'Upload a PNG or JPG to add a seal, signature, or logo to the stamp.'
           }</small>
         </label>
         <label class="toggle">
-          <input data-stamp-setting="flatten" type="checkbox" ${this.state.stamp.flatten ? 'checked' : ''} />
+          <input data-stamp-setting="flatten" type="checkbox" ${settings.flatten ? 'checked' : ''} />
           Flatten filled fields on export
         </label>
         <div class="inspector-actions">
+          <button type="button" class="ghost-button" data-action="add-stamp">Add another stamp</button>
           <button type="button" class="ghost-button" data-action="open-advanced">Document fields</button>
-          ${
-            isStampPlaced(this.state.stamp)
-              ? '<button type="button" class="ghost-button" data-action="delete-stamp">Delete stamp</button>'
-              : ''
-          }
+          <button type="button" class="ghost-button" data-action="delete-stamp">Delete stamp</button>
           ${
             hasImage
               ? '<button type="button" class="ghost-button" data-action="clear-stamp-image">Remove image</button>'
@@ -1924,63 +2087,77 @@ export class PdfStampStudio {
     }).join(''));
   }
 
-  private renderPreviewStamp(): void {    const currentPage = this.getCurrentPage();
-    if (!currentPage || !shouldShowStampOnPage(this.state.stamp, currentPage.id)) {
+  private renderPreviewStamp(): void {
+    const currentPage = this.getCurrentPage();
+    const placed = currentPage
+      ? this.state.stamps.filter((stamp) => shouldShowStampOnPage(stamp.settings, currentPage.id))
+      : [];
+    if (!currentPage || placed.length === 0) {
       this.elements.previewStamp.hidden = true;
       this.elements.previewGuides.hidden = true;
       this.elements.previewStamp.innerHTML = '';
       return;
     }
 
-    const hasImage = Boolean(this.state.stampImageUrl);
-    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
-    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
-    const rows = buildStampRows(this.state.stamp);
-    const placement = this.state.stamp.placement;
-    const baseHeight = stampPreviewBaseHeight(rows, showTable, showImage);
-    const widthPoints = stampWidthPoints(placement.width, currentPage);
-    const heightPoints = stampHeightPoints(placement.height, widthPoints, baseHeight, currentPage);
     const stageRect = this.getPreviewStageRect();
-    const stampWidthPx = xPointsToPreviewPixels(widthPoints, currentPage, stageRect);
-    const stampHeightPx = yPointsToPreviewPixels(heightPoints, currentPage, stageRect);
-    const scaleX = Number((stampWidthPx / STAMP_PREVIEW_BASE_WIDTH).toFixed(4));
-    const scaleY = Number((stampHeightPx / baseHeight).toFixed(4));
-    const fontScale = Number(Math.max(0.01, Math.min(scaleX, scaleY)).toFixed(4));
-    const verticalGuide = this.state.stampSelected && Math.abs(placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
-    const horizontalGuide = this.state.stampSelected && Math.abs(placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
-    const interactionClass = this.stampInteraction ? ` is-${this.stampInteraction.kind}` : '';
-    const surfaceCursor =
-      this.stampInteraction?.kind === 'resize' && this.stampInteraction.handle
-        ? cursorForHandle(this.stampInteraction.handle, placement.rotation)
-        : this.stampInteraction?.kind === 'drag'
-          ? 'grabbing'
-          : this.stampInteraction?.kind === 'rotate'
-            ? 'grabbing'
-            : 'grab';
+    const selectedId = this.state.selectedStampId;
+    const selected = placed.find((stamp) => stamp.id === selectedId);
+    const verticalGuide = selected
+      && Math.abs(selected.settings.placement.x - 0.5) < STAMP_SNAP_THRESHOLD;
+    const horizontalGuide = selected
+      && Math.abs(selected.settings.placement.y - 0.5) < STAMP_SNAP_THRESHOLD;
 
     this.elements.previewGuides.hidden = !verticalGuide && !horizontalGuide;
     this.elements.previewGuides.className = `preview-guides${verticalGuide ? ' show-vertical' : ''}${horizontalGuide ? ' show-horizontal' : ''}`;
     this.syncPreviewOverlayFrame();
 
     this.elements.previewStamp.hidden = false;
-    this.updateContainerMarkup(this.elements.previewStamp, `
+    this.updateContainerMarkup(this.elements.previewStamp, placed.map((stamp) => {
+      const settings = stamp.settings;
+      const isSelected = stamp.id === selectedId;
+      const hasImage = this.stampImageUrls.has(stamp.id);
+      const showTable = shouldShowStampTable(settings, hasImage);
+      const showImage = shouldShowStampImage(settings, hasImage);
+      const rows = buildStampRows(settings);
+      const placement = settings.placement;
+      const baseHeight = stampPreviewBaseHeight(rows, showTable, showImage);
+      const widthPoints = stampWidthPoints(placement.width, currentPage);
+      const heightPoints = stampHeightPoints(placement.height, widthPoints, baseHeight, currentPage);
+      const stampWidthPx = xPointsToPreviewPixels(widthPoints, currentPage, stageRect);
+      const stampHeightPx = yPointsToPreviewPixels(heightPoints, currentPage, stageRect);
+      const scaleX = Number((stampWidthPx / STAMP_PREVIEW_BASE_WIDTH).toFixed(4));
+      const scaleY = Number((stampHeightPx / baseHeight).toFixed(4));
+      const fontScale = Number(Math.max(0.01, Math.min(scaleX, scaleY)).toFixed(4));
+      const interaction = this.stampInteraction?.stampId === stamp.id ? this.stampInteraction : null;
+      const interactionClass = interaction ? ` is-${interaction.kind}` : '';
+      const surfaceCursor =
+        interaction?.kind === 'resize' && interaction.handle
+          ? cursorForHandle(interaction.handle, placement.rotation)
+          : interaction
+            ? 'grabbing'
+            : 'grab';
+      const imageUrl = this.stampImageUrlFor(stamp.id);
+
+      return `
       <div
-        class="preview-stamp-object ${this.state.stampSelected ? 'is-selected' : ''}${interactionClass}"
+        class="preview-stamp-object ${isSelected ? 'is-selected' : ''}${interactionClass}"
+        data-stamp-id="${escapeAttribute(stamp.id)}"
         style="--stamp-scale-x:${scaleX}; --stamp-scale-y:${scaleY}; --stamp-font-scale:${fontScale}; left:${placement.x * 100}%; top:${placement.y * 100}%; width:${stampWidthPx}px; height:${stampHeightPx}px; transform: translate(-50%, -50%) rotate(${placement.rotation}deg);"
       >
         <div class="preview-stamp-body" style="cursor:${surfaceCursor};">
           <div class="preview-stamp-card">
-            ${showTable ? renderStampTable(rows, { editable: this.state.stampSelected, truncatedKeys: this.stampTruncation() }) : ''}
+            ${showTable ? renderStampTable(rows, { editable: isSelected, truncatedKeys: this.stampTruncation() }) : ''}
             ${
-              showImage && this.state.stampImageUrl
-                ? `<img class="stamp-preview-image preview-stamp-image" src="${this.state.stampImageUrl}" alt="Preview stamp image" />`
+              showImage && imageUrl
+                ? `<img class="stamp-preview-image preview-stamp-image" src="${imageUrl}" alt="Preview stamp image" />`
                 : ''
             }
           </div>
         </div>
-        ${this.state.stampSelected ? renderStampHandles(placement.rotation) : ''}
+        ${isSelected ? renderStampHandles(placement.rotation) : ''}
       </div>
-    `);
+      `;
+    }).join(''));
   }
 
   private renderAdvancedSheetVisibility(): void {
@@ -2063,21 +2240,28 @@ export class PdfStampStudio {
 
   private persistPreferences(): void {
     try {
+      const stampTextKeys = [
+        'mode',
+        'payee',
+        'totalAmount',
+        'gstAmount',
+        'movementNumber',
+        'signedBy',
+        'coSignedBy',
+        'approvedBy1',
+        'approvedBy2',
+        'date',
+        'flatten',
+      ] as const;
       const data: PersistedPreferences = {
         profile: { ...this.state.profile },
-        stamp: {
-          mode: this.state.stamp.mode,
-          payee: this.state.stamp.payee,
-          totalAmount: this.state.stamp.totalAmount,
-          gstAmount: this.state.stamp.gstAmount,
-          movementNumber: this.state.stamp.movementNumber,
-          signedBy: this.state.stamp.signedBy,
-          coSignedBy: this.state.stamp.coSignedBy,
-          approvedBy1: this.state.stamp.approvedBy1,
-          approvedBy2: this.state.stamp.approvedBy2,
-          date: this.state.stamp.date,
-          flatten: this.state.stamp.flatten,
-        },
+        stamps: this.state.stamps.map(({ settings }) => {
+          const draft: Record<string, unknown> = {};
+          for (const key of stampTextKeys) {
+            draft[key] = settings[key];
+          }
+          return draft as PersistedPreferences['stamps'][number];
+        }),
         overwriteExisting: this.state.overwriteExisting,
         blankInsertMode: this.state.blankInsertMode,
       };
@@ -2103,14 +2287,20 @@ export class PdfStampStudio {
     }
   }
 
-  private clearStampImage(): void {
-    if (this.state.stampImageUrl) {
-      URL.revokeObjectURL(this.state.stampImageUrl);
+  private clearSelectedStampImage(): void {
+    const selected = this.getSelectedStamp();
+    if (!selected) {
+      return;
     }
 
-    this.state.stampImageUrl = null;
-    this.state.stamp = {
-      ...this.state.stamp,
+    const existingUrl = this.stampImageUrls.get(selected.id);
+    if (existingUrl) {
+      URL.revokeObjectURL(existingUrl);
+      this.stampImageUrls.delete(selected.id);
+    }
+
+    this.activeStamp = {
+      ...selected.settings,
       imageBytes: null,
       imageMime: null,
       imageName: null,
@@ -2183,25 +2373,30 @@ export class PdfStampStudio {
     return this.state.pages.findIndex((page) => page.id === this.state.previewPageId);
   }
 
-  private getCurrentStampBaseHeight(): number {
-    const hasImage = Boolean(this.state.stampImageUrl);
-    const showTable = shouldShowStampTable(this.state.stamp, hasImage);
-    const showImage = shouldShowStampImage(this.state.stamp, hasImage);
-    return stampPreviewBaseHeight(buildStampRows(this.state.stamp), showTable, showImage);
+  private stampBaseHeightFor(settings: StampSettings, stampId: string | null): number {
+    const hasImage = stampId ? this.stampImageUrls.has(stampId) : false;
+    const showTable = shouldShowStampTable(settings, hasImage);
+    const showImage = shouldShowStampImage(settings, hasImage);
+    return stampPreviewBaseHeight(buildStampRows(settings), showTable, showImage);
   }
 
   /** Keys of stamp rows whose text will be cut off by export wrapping. */
   private stampTruncation(): string[] {
-    const hasImage = Boolean(this.state.stampImageUrl);
-    if (!shouldShowStampTable(this.state.stamp, hasImage)) {
-      return [];
+    const truncated = new Set<string>();
+    for (const stamp of this.state.stamps) {
+      const hasImage = this.stampImageUrls.has(stamp.id);
+      if (!shouldShowStampTable(stamp.settings, hasImage)) {
+        continue;
+      }
+
+      for (const row of buildStampRows(stamp.settings)) {
+        if (wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated) {
+          truncated.add(row.key);
+        }
+      }
     }
 
-    return buildStampRows(this.state.stamp)
-      .filter((row) =>
-        wrapStampText(displayStampRowValue(row), row.maxCharsPerLine, row.maxLines).truncated,
-      )
-      .map((row) => row.key);
+    return [...truncated];
   }
 
   private getPreviewStageRect(): DOMRect | null {
@@ -2214,11 +2409,12 @@ export class PdfStampStudio {
 
   private getInspectorSide(): 'left' | 'right' {
     const currentPage = this.getCurrentPage();
-    if (!currentPage || !shouldShowStampOnPage(this.state.stamp, currentPage.id)) {
+    const selected = this.getSelectedStamp();
+    if (!currentPage || !selected || !shouldShowStampOnPage(selected.settings, currentPage.id)) {
       return 'right';
     }
 
-    return this.state.stamp.placement.x > 0.56 ? 'left' : 'right';
+    return selected.settings.placement.x > 0.56 ? 'left' : 'right';
   }
 
   private showPreviewHint(message: string): void {
@@ -2724,9 +2920,16 @@ function loadPreferences(): PersistedPreferences | null {
       }
     }
 
-    const stampSource = (typeof parsed.stamp === 'object' && parsed.stamp !== null
-      ? parsed.stamp
-      : {}) as Record<string, unknown>;
+    // Current shape is `stamps: [...]`; accept the legacy single `stamp`
+    // object from earlier versions too.
+    const legacyStamp =
+      typeof (parsed as { stamp?: unknown }).stamp === 'object' &&
+      (parsed as { stamp?: unknown }).stamp !== null
+        ? [(parsed as { stamp?: unknown }).stamp as Record<string, unknown>]
+        : [];
+    const stampSources = Array.isArray(parsed.stamps) && parsed.stamps.length > 0
+      ? (parsed.stamps as Record<string, unknown>[]).slice(0, 10)
+      : legacyStamp;
     const stampTextKeys = [
       'payee',
       'totalAmount',
@@ -2738,26 +2941,25 @@ function loadPreferences(): PersistedPreferences | null {
       'approvedBy2',
       'date',
     ] as const;
-    const stamp = {} as PersistedPreferences['stamp'];
-    for (const key of stampTextKeys) {
-      if (typeof stampSource[key] === 'string') {
-        stamp[key] = stampSource[key] as string;
+    const stamps = stampSources.map((source) => {
+      const draft = {} as PersistedPreferences['stamps'][number];
+      for (const key of stampTextKeys) {
+        if (typeof source[key] === 'string') {
+          draft[key] = source[key] as string;
+        }
       }
-    }
-    if (
-      stampSource.mode === 'text' ||
-      stampSource.mode === 'image' ||
-      stampSource.mode === 'both'
-    ) {
-      stamp.mode = stampSource.mode;
-    }
-    if (typeof stampSource.flatten === 'boolean') {
-      stamp.flatten = stampSource.flatten;
-    }
+      if (source.mode === 'text' || source.mode === 'image' || source.mode === 'both') {
+        draft.mode = source.mode;
+      }
+      if (typeof source.flatten === 'boolean') {
+        draft.flatten = source.flatten;
+      }
+      return draft;
+    });
 
     return {
       profile,
-      stamp,
+      stamps,
       overwriteExisting: parsed.overwriteExisting === true,
       blankInsertMode: parsed.blankInsertMode === 'at-end' ? 'at-end' : 'after-current',
     };
