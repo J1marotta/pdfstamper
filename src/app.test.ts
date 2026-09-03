@@ -733,7 +733,7 @@ describe('PdfStampStudio shell', () => {
     const stampObject = document.querySelector('.preview-stamp-object') as HTMLElement | null;
     expect(stampObject).not.toBeNull();
     expect(stampObject?.getAttribute('style')).toContain('--stamp-scale-x:0.0261');
-    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale-y:0.0469');
+    expect(stampObject?.getAttribute('style')).toContain('--stamp-scale-y:0.0423');
     expect(stampObject?.getAttribute('style')).toContain('--stamp-font-scale:0.0261');
     expect(stampObject?.getAttribute('style')).toContain('width:12px');
   });

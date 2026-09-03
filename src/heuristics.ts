@@ -203,7 +203,7 @@ export function inferSemanticKey(input: string): SemanticKey | null {
 
       if (spaced === aliasWords || compact === aliasCompact) {
         score = 140 + aliasCompact.length;
-      } else if (spaced.includes(aliasWords)) {
+      } else if (includesPhrase(spaced, aliasWords)) {
         score = 100 + aliasCompact.length;
       } else if (compact.includes(aliasCompact)) {
         score = 82 + aliasCompact.length;
@@ -235,7 +235,7 @@ export function pickActiveProfileKeys(
   }
 
   for (const definition of PROFILE_FIELDS) {
-    if (FIELD_ALIASES[definition.key].some((alias) => digest.includes(normaliseWords(alias)))) {
+    if (FIELD_ALIASES[definition.key].some((alias) => includesPhrase(digest, normaliseWords(alias)))) {
       active.add(definition.key);
     }
   }
@@ -441,6 +441,32 @@ function normaliseWords(input: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Phrase match on word boundaries. Both inputs must already be normalised
+ * via normaliseWords (lowercase alphanumerics separated by single spaces),
+ * so a boundary is simply the start/end of string or a space. Plain
+ * substring matching false-positives on short aliases (e.g. "tel" inside
+ * "hotel", "date" inside "candidate", "title" inside "entitlement").
+ */
+function includesPhrase(haystack: string, phrase: string): boolean {
+  if (!phrase) {
+    return false;
+  }
+
+  let index = haystack.indexOf(phrase);
+  while (index !== -1) {
+    const beforeOk = index === 0 || haystack[index - 1] === ' ';
+    const afterIndex = index + phrase.length;
+    const afterOk = afterIndex >= haystack.length || haystack[afterIndex] === ' ';
+    if (beforeOk && afterOk) {
+      return true;
+    }
+    index = haystack.indexOf(phrase, index + 1);
+  }
+
+  return false;
 }
 
 function normaliseCompact(input: string): string {

@@ -568,7 +568,7 @@ button {
 .stamp-preview-image {
   display: block;
   max-width: 100%;
-  max-height: 160px;
+  max-height: calc(160px * var(--stamp-scale-y));
   margin: 0 auto;
 }
 

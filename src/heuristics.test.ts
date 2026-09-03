@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyProfileToFields } from './heuristics';
+import { applyProfileToFields, inferSemanticKey, pickActiveProfileKeys } from './heuristics';
 import type { PdfFieldModel } from './types';
 
 describe('applyProfileToFields', () => {
@@ -50,5 +50,44 @@ describe('applyProfileToFields', () => {
     expect(result.fields[0]?.value).toBe('');
     expect(result.fields[0]?.autoFilled).toBe(false);
     expect(result.stats.remainingCount).toBe(1);
+  });
+});
+
+describe('inferSemanticKey', () => {
+  it('matches real aliases across separators and casing', () => {
+    expect(inferSemanticKey('full_name')).toBe('fullName');
+    expect(inferSemanticKey('Contact Email')).toBe('email');
+    expect(inferSemanticKey('applicantfullname')).toBe('fullName');
+  });
+
+  it('does not match short aliases inside unrelated words', () => {
+    expect(inferSemanticKey('hotelName')).not.toBe('phone');
+    expect(inferSemanticKey('candidateDetails')).not.toBe('date');
+    expect(inferSemanticKey('entitlementType')).not.toBe('title');
+    expect(inferSemanticKey('preferredContact')).not.toBe('reference');
+  });
+});
+
+describe('pickActiveProfileKeys', () => {
+  function fieldWithKey(semanticKey: null): PdfFieldModel {
+    return {
+      id: 'x',
+      name: 'notes',
+      label: 'Notes',
+      kind: 'text',
+      semanticKey,
+      value: '',
+      originalValue: '',
+      dirty: false,
+      autoFilled: false,
+      options: [],
+      readOnly: false,
+    };
+  }
+
+  it('does not surface phone for a digest that only mentions hotel', () => {
+    const keys = pickActiveProfileKeys([fieldWithKey(null)], 'hotel company invoice');
+    expect(keys).toContain('company');
+    expect(keys).not.toContain('phone');
   });
 });

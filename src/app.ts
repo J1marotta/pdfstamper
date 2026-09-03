@@ -65,6 +65,7 @@ interface AppElements {
   stampControls: HTMLElement;
   profileFields: HTMLElement;
   fieldList: HTMLElement;
+  fillStats: HTMLElement;
   overwriteToggle: HTMLInputElement;
   previewFrame: HTMLElement;
   previewCanvas: HTMLCanvasElement;
@@ -135,6 +136,7 @@ export class PdfStampStudio {
   private readonly elements: AppElements;
   private state: AppState;
   private previewToken = 0;
+  private previewRenderChain: Promise<void> = Promise.resolve();
   private previewResizeFrame: number | null = null;
   private blankPageSerial = 0;
   private stampInteraction: StampInteraction | null = null;
@@ -155,6 +157,7 @@ export class PdfStampStudio {
       stampControls: this.root.querySelector<HTMLElement>('#stamp-controls')!,
       profileFields: this.root.querySelector<HTMLElement>('#profile-fields')!,
       fieldList: this.root.querySelector<HTMLElement>('#field-list')!,
+      fillStats: this.root.querySelector<HTMLElement>('#fill-stats')!,
       overwriteToggle: this.root.querySelector<HTMLInputElement>('#overwrite-toggle')!,
       previewFrame: this.root.querySelector<HTMLElement>('#preview-frame')!,
       previewCanvas: this.root.querySelector<HTMLCanvasElement>('#preview-canvas')!,
@@ -255,6 +258,14 @@ export class PdfStampStudio {
       if (action === 'clear-stamp-image') {
         this.invalidateLastExport();
         this.clearStampImage();
+        if (this.state.stamp.mode === 'image') {
+          // "Image only" with no image falls back to the table anyway, so
+          // switch to text to match what is actually rendered.
+          this.state.stamp = {
+            ...this.state.stamp,
+            mode: 'text',
+          };
+        }
         this.renderStampControls();
         this.renderPreviewStamp();
         return;
@@ -335,13 +346,19 @@ export class PdfStampStudio {
         return;
       }
 
+      const widthPoints = stampWidthPoints(this.state.stamp.placement.width, currentPage);
       const placement = placementFromPointer(
         currentPage.id,
         event.clientX,
         event.clientY,
         stageRect,
         currentPage,
-        stampWidthPoints(this.state.stamp.placement.width, currentPage),
+        {
+          widthPoints,
+          heightPoints: this.state.stamp.placement.height,
+          baseHeight: this.getCurrentStampBaseHeight(),
+          rotation: this.state.stamp.placement.rotation,
+        },
       );
       this.state.stamp = {
         ...this.state.stamp,
@@ -350,6 +367,7 @@ export class PdfStampStudio {
       this.state.stampSelected = true;
       this.invalidateLastExport();
       this.renderStampControls();
+      this.renderThumbnailRail();
       this.renderPreviewStamp();
     });
 
@@ -423,12 +441,14 @@ export class PdfStampStudio {
         return;
       }
 
-      const baseHeight = this.getCurrentStampBaseHeight();
       const startWidth = stampWidthPoints(this.state.stamp.placement.width, currentPage);
+      // Normalise legacy relative widths to absolute points, but keep the
+      // height untouched (it may be `undefined` for auto aspect). Forcing an
+      // explicit height here would freeze the aspect and stop the stamp from
+      // growing when an image is added later.
       const startPlacement = {
         ...this.state.stamp.placement,
         width: startWidth,
-        height: stampHeightPoints(this.state.stamp.placement.height, startWidth, baseHeight, currentPage),
       };
       if (startPlacement.width !== this.state.stamp.placement.width) {
         this.state.stamp = {
@@ -453,6 +473,7 @@ export class PdfStampStudio {
 
       window.addEventListener('pointermove', this.onPointerMove);
       window.addEventListener('pointerup', this.onPointerUp);
+      window.addEventListener('pointercancel', this.onPointerUp);
     });
 
     this.elements.stampControls.addEventListener('input', (event) => {
@@ -476,6 +497,13 @@ export class PdfStampStudio {
           [stampSetting]: nextValue,
         };
         this.invalidateLastExport();
+        if (stampSetting === 'date') {
+          // The date input fires on every keystroke while the picker is
+          // open; re-rendering the inspector here would drop focus and close
+          // the picker. The preview overlay reads the same state.
+          this.renderPreviewStamp();
+          return;
+        }
         this.renderStampControls();
         this.renderPreviewStamp();
         return;
@@ -635,6 +663,13 @@ export class PdfStampStudio {
         this.schedulePreviewRender();
       }
     });
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && this.state.advancedOpen) {
+        this.state.advancedOpen = false;
+        this.renderAdvancedSheetVisibility();
+      }
+    });
   }
 
   private readonly onPointerMove = (event: PointerEvent): void => {
@@ -705,8 +740,17 @@ export class PdfStampStudio {
       minWidth: xPointsToPreviewPixels(STAMP_MIN_WIDTH_POINTS, currentPage, stageRect),
       minHeight: yPointsToPreviewPixels(STAMP_MIN_WIDTH_POINTS, currentPage, stageRect),
     });
-    const nextWidthPoints = previewPixelsToXPoints(nextSizePx.width, currentPage, stageRect);
-    const nextHeightPoints = previewPixelsToYPoints(nextSizePx.height, currentPage, stageRect);
+    const handle = interaction.handle!;
+    const horizontal = handle.includes('e') || handle.includes('w');
+    const vertical = handle.includes('n') || handle.includes('s');
+    // Preserve the untouched axis (including `undefined` auto height) so a
+    // pure horizontal resize keeps auto aspect instead of freezing it.
+    const nextWidthPoints = horizontal
+      ? previewPixelsToXPoints(nextSizePx.width, currentPage, stageRect)
+      : interaction.startPlacement.width;
+    const nextHeightPoints = vertical
+      ? previewPixelsToYPoints(nextSizePx.height, currentPage, stageRect)
+      : interaction.startPlacement.height;
     this.updatePlacementFromPixels(
       startCenterX,
       startCenterY,
@@ -720,12 +764,20 @@ export class PdfStampStudio {
 
   private readonly onPointerUp = (): void => {
     if (this.stampInteraction) {
+      // Suppress the click that the browser fires right after this
+      // pointerup so a drag does not also trigger click-to-move. Clear on a
+      // timer so a drag that ends off-canvas does not eat the *next*
+      // unrelated click.
       this.suppressNextPreviewClick = true;
+      window.setTimeout(() => {
+        this.suppressNextPreviewClick = false;
+      }, 0);
     }
 
     this.stampInteraction = null;
     window.removeEventListener('pointermove', this.onPointerMove);
     window.removeEventListener('pointerup', this.onPointerUp);
+    window.removeEventListener('pointercancel', this.onPointerUp);
     this.renderPreviewStamp();
   };
 
@@ -838,6 +890,7 @@ export class PdfStampStudio {
         'error',
       );
       this.renderThumbnailRail();
+      this.renderFillStats();
       this.renderPreviewMeta();
     } finally {
       this.state.loadingPdf = false;
@@ -1079,6 +1132,7 @@ export class PdfStampStudio {
     if (fieldList) {
       this.renderFieldList();
     }
+    this.renderFillStats();
   }
 
   private renderAll(): void {
@@ -1088,6 +1142,7 @@ export class PdfStampStudio {
     this.renderThumbnailRail();
     this.renderProfileFields();
     this.renderFieldList();
+    this.renderFillStats();
     this.renderStampControls();
     this.renderExportPanel();
     this.renderPreviewMeta();
@@ -1247,6 +1302,15 @@ export class PdfStampStudio {
     this.updateContainerMarkup(this.elements.fieldList, rows);
   }
 
+  private renderFillStats(): void {
+    const copy = !this.state.bundle
+      ? 'Field stats appear here after parsing.'
+      : this.state.fields.length === 0
+        ? 'No AcroForm fields were detected in this PDF.'
+        : `${this.state.stats.autofilledCount} of ${this.state.stats.editableCount} fields auto-filled · ${this.state.stats.remainingCount} need attention`;
+    this.updateContainerMarkup(this.elements.fillStats, escapeHtml(copy));
+  }
+
   private renderStampControls(): void {
     const bundleLoaded = Boolean(this.state.bundle);
     const hasImage = Boolean(this.state.stampImageUrl);
@@ -1385,7 +1449,24 @@ export class PdfStampStudio {
       return;
     }
 
+    // Serialize renders on a chain: concurrent renders share one canvas, so
+    // overlapping pdf.js draws can land out of order and leave a stale page
+    // visible. Queueing keeps the final pixels matching the latest request.
     const renderToken = ++this.previewToken;
+    const run = this.previewRenderChain.then(() =>
+      this.runPreviewRender(renderToken, bundle, currentPage),
+    );
+    this.previewRenderChain = run.catch(() => undefined);
+    await run;
+  }
+
+  private async runPreviewRender(
+    renderToken: number,
+    bundle: NonNullable<AppState['bundle']>,
+    currentPage: DocumentPageModel,
+  ): Promise<void> {
+    // Queued renders run in order so the shared canvas never shows stale
+    // pixels; only the latest token updates the overlay/visibility below.
     this.elements.previewFrame.classList.add('is-loading');
     this.showPreviewHint(currentPage.kind === 'blank' ? 'Preparing blank page…' : 'Rendering page preview…');
 
@@ -1732,6 +1813,7 @@ function shellMarkup(): string {
           </div>
           <div class="advanced-section">
             <div class="advanced-section-copy">Manual overrides here always win.</div>
+            <div id="fill-stats" class="advanced-section-copy"></div>
             <div id="field-list" class="field-list"></div>
           </div>
         </div>
@@ -1778,8 +1860,10 @@ function buildDocumentPages(pageSizes: PageSize[]): DocumentPageModel[] {
 }
 
 function renderBlankPreview(canvas: HTMLCanvasElement, page: DocumentPageModel): void {
-  const parentWidth = Math.max(380, Math.min(canvas.parentElement?.clientWidth ?? 860, 980));
-  const scale = Math.min(1.5, parentWidth / page.width);
+  // Same sizing caps as renderPreviewPage so switching between PDF and blank
+  // pages does not shift the canvas size (and the stamp's relative size).
+  const parentWidth = Math.max(320, Math.min(canvas.parentElement?.clientWidth ?? 720, 860));
+  const scale = Math.min(1.7, parentWidth / page.width);
   const width = page.width * scale;
   const height = page.height * scale;
   const pixelRatio = window.devicePixelRatio || 1;
@@ -1806,17 +1890,30 @@ function placementFromPointer(
   clientY: number,
   rect: DOMRect,
   page: DocumentPageModel,
-  widthPoints: number,
+  size: {
+    widthPoints: number;
+    heightPoints: number | undefined;
+    baseHeight: number;
+    rotation: number;
+  },
 ): StampPlacement {
-  const halfWidth = xPointsToPreviewPixels(widthPoints, page, rect) / 2;
+  const resolvedHeightPoints = stampHeightPoints(
+    size.heightPoints,
+    size.widthPoints,
+    size.baseHeight,
+    page,
+  );
+  const halfWidth = xPointsToPreviewPixels(size.widthPoints, page, rect) / 2;
+  const halfHeight = yPointsToPreviewPixels(resolvedHeightPoints, page, rect) / 2;
   const safeX = clampPreviewCenter(clientX - rect.left, halfWidth, rect.width) * rect.width;
-  const safeY = clampPreviewCenter(clientY - rect.top, 90, rect.height) * rect.height;
+  const safeY = clampPreviewCenter(clientY - rect.top, halfHeight, rect.height) * rect.height;
   return {
     pageId,
     x: safeX / rect.width,
     y: safeY / rect.height,
-    width: widthPoints,
-    rotation: 0,
+    width: size.widthPoints,
+    height: size.heightPoints,
+    rotation: size.rotation,
   };
 }
 
@@ -2010,7 +2107,7 @@ function renderFieldControl(field: PdfFieldModel): string {
   if (field.kind === 'checkbox') {
     return `
       <label class="checkbox-field">
-        <input data-field-id="${field.id}" type="checkbox" ${field.value === true ? 'checked' : ''} />
+        <input data-field-id="${escapeAttribute(field.id)}" type="checkbox" ${field.value === true ? 'checked' : ''} />
         Tick this box
       </label>
     `;
@@ -2018,7 +2115,7 @@ function renderFieldControl(field: PdfFieldModel): string {
 
   if (field.kind === 'dropdown' || field.kind === 'radio' || field.kind === 'option-list') {
     return `
-      <select data-field-id="${field.id}">
+      <select data-field-id="${escapeAttribute(field.id)}">
         <option value="">Leave blank</option>
         ${field.options.map((option) => {
           const selected = field.value === option ? 'selected' : '';
@@ -2028,7 +2125,7 @@ function renderFieldControl(field: PdfFieldModel): string {
     `;
   }
 
-  return `<input data-field-id="${field.id}" type="text" value="${escapeAttribute(typeof field.value === 'string' ? field.value : '')}" />`;
+  return `<input data-field-id="${escapeAttribute(field.id)}" type="text" value="${escapeAttribute(typeof field.value === 'string' ? field.value : '')}" />`;
 }
 
 function cloneStampSettings(stamp: StampSettings): StampSettings {
@@ -2179,6 +2276,16 @@ function selectorForElement(element: HTMLElement): string | null {
     return `[data-stamp-key="${escapeSelector(stampKey)}"]`;
   }
 
+  const stampSetting = element.dataset.stampSetting;
+  if (stampSetting) {
+    return `[data-stamp-setting="${escapeSelector(stampSetting)}"]`;
+  }
+
+  const uiSetting = element.dataset.uiSetting;
+  if (uiSetting) {
+    return `[data-ui-setting="${escapeSelector(uiSetting)}"]`;
+  }
+
   if (element.id) {
     return `#${escapeSelector(element.id)}`;
   }
@@ -2212,7 +2319,8 @@ function isStampValueKey(key: keyof StampSettings): key is
   | 'signedBy'
   | 'coSignedBy'
   | 'approvedBy1'
-  | 'approvedBy2' {
+  | 'approvedBy2'
+  | 'date' {
   return [
     'payee',
     'totalAmount',
@@ -2222,6 +2330,7 @@ function isStampValueKey(key: keyof StampSettings): key is
     'coSignedBy',
     'approvedBy1',
     'approvedBy2',
+    'date',
   ].includes(key);
 }
 

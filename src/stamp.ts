@@ -8,7 +8,8 @@ export type EditableStampKey =
   | 'signedBy'
   | 'coSignedBy'
   | 'approvedBy1'
-  | 'approvedBy2';
+  | 'approvedBy2'
+  | 'date';
 
 export interface StampRowModel {
   key: EditableStampKey;
@@ -90,6 +91,14 @@ const STAMP_ROW_DEFINITIONS: Array<
     maxLines: 2,
     minHeight: 30,
   },
+  {
+    key: 'date',
+    label: 'Date',
+    placeholder: 'YYYY-MM-DD',
+    maxCharsPerLine: 26,
+    maxLines: 1,
+    minHeight: 28,
+  },
 ];
 
 export function buildStampRows(stamp: StampSettings): StampRowModel[] {
@@ -127,6 +136,8 @@ export function syncStampFromProfile(
   const nextSignedBy = deriveSignerFromProfile(nextProfile);
   const previousMovement = previousProfile.reference || '';
   const nextMovement = nextProfile.reference || '';
+  const previousDate = previousProfile.date || '';
+  const nextDate = nextProfile.date || '';
 
   return {
     ...stamp,
@@ -135,7 +146,7 @@ export function syncStampFromProfile(
     movementNumber: shouldSyncStamp(stamp.movementNumber, previousMovement)
       ? nextMovement
       : stamp.movementNumber,
-    date: nextProfile.date || stamp.date,
+    date: shouldSyncStamp(stamp.date, previousDate) ? nextDate || stamp.date : stamp.date,
   };
 }
 

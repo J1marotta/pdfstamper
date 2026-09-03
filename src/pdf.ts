@@ -168,7 +168,15 @@ export async function exportFilledPdf(
       return;
     }
 
-    const keptPage = document.getPage(targetIndex);
+    const keptPage = (() => {
+      try {
+        return document.getPage(targetIndex);
+      } catch {
+        // Defensive: the UI preserves source-page order, but never fail an
+        // export if the mapping ever drifts out of range.
+        return undefined;
+      }
+    })();
     if (keptPage) {
       pageMap.set(pageModel.id, keptPage);
     }
@@ -507,7 +515,7 @@ function drawStampTable(
   rotation: number,
 ): void {
   const totalHeight = rows.reduce((sum, row) => sum + row.height * scaleY, 0);
-  const labelWidth = Math.min(145 * scaleX, width * 0.34);
+  const labelWidth = Math.min(156 * scaleX, width * 0.34);
   const outerOrigin = rotatePoint(x, y, centerX, centerY, rotation);
 
   page.drawRectangle({

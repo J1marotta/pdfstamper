@@ -55,9 +55,22 @@ describe('stamp helpers', () => {
       'coSignedBy',
       'approvedBy1',
       'approvedBy2',
+      'date',
     ]);
     expect(rows[0]?.value).toBe('Acme');
     expect(rows[1]?.emphasis).toBe(true);
+    expect(rows[8]?.value).toBe('2026-05-20');
+  });
+
+  it('keeps a manually edited stamp date instead of overwriting it from the profile', () => {
+    const previousProfile = { date: '2026-05-20' };
+    const nextProfile = { date: '2026-05-21' };
+
+    const linked = syncStampFromProfile(previousProfile, nextProfile, makeStamp({ date: '2026-05-20' }));
+    const custom = syncStampFromProfile(previousProfile, nextProfile, makeStamp({ date: '2026-06-01' }));
+
+    expect(linked.date).toBe('2026-05-21');
+    expect(custom.date).toBe('2026-06-01');
   });
 
   it('syncs stamp values from profile only while those fields are still linked', () => {
