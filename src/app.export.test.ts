@@ -129,6 +129,31 @@ describe('PdfStampStudio export flow', () => {
     expect(downloadButton?.textContent).toContain('Download stamped PDF');
   });
 
+  it('falls back to an anchor download when the native picker aborts', async () => {
+    const internalStudio = await seedReadyStudio();
+    await internalStudio.handleExport();
+
+    (window as typeof window & { showSaveFilePicker?: unknown }).showSaveFilePicker = vi.fn(
+      async () => {
+        throw new DOMException('dismissed', 'AbortError');
+      },
+    );
+    const downloaded: string[] = [];
+    const originalClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      if (this.hasAttribute('download')) {
+        downloaded.push(this.download);
+      }
+    };
+    try {
+      await internalStudio.downloadLastExport();
+    } finally {
+      HTMLAnchorElement.prototype.click = originalClick;
+    }
+
+    expect(downloaded).toEqual(['resume-stamped.pdf']);
+  });
+
   it('uses the native save picker from the final download button when available', async () => {
     const internalStudio = await seedReadyStudio();
     await internalStudio.handleExport();

@@ -1796,11 +1796,12 @@ export class PdfStampStudio {
         this.renderStatus();
         return;
       } catch (error) {
-        if (isSaveDialogAbort(error)) {
-          return;
+        // The native picker may be unavailable, denied, or headless: fall
+        // through to the anchor download so the file still reaches the user.
+        // User-cancelled dialogs stay quiet; anything else gets logged.
+        if (!(error instanceof DOMException && error.name === 'AbortError')) {
+          console.error(error);
         }
-
-        console.error(error);
       }
     }
 
@@ -3133,10 +3134,6 @@ type SavePicker = (options: {
 
 function getSaveFilePicker(): SavePicker | undefined {
   return (window as typeof window & { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
-}
-
-function isSaveDialogAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === 'AbortError';
 }
 
 function triggerBrowserDownload(url: string, fileName: string): void {
