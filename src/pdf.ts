@@ -17,7 +17,7 @@ import { GlobalWorkerOptions, getDocument } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { humanizeFieldName, inferSemanticKey } from './heuristics';
-import { buildStampRows, isStampPlaced, shouldShowStampImage, shouldShowStampTable } from './stamp';
+import { buildStampRows, formatStampDate, isStampPlaced, shouldShowStampImage, shouldShowStampTable } from './stamp';
 import type { DocumentPageModel, PageSize, PdfFieldModel, StampSettings } from './types';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
@@ -471,7 +471,7 @@ function buildPdfStampRows(stamp: StampSettings): Array<{
   return buildStampRows(stamp).map((row) =>
     makePdfStampRow(
       row.labelLines,
-      wrapText(row.value, row.maxCharsPerLine, row.maxLines),
+      wrapText(row.key === 'date' ? formatStampDate(row.value) : row.value, row.maxCharsPerLine, row.maxLines),
       row.minHeight,
       row.emphasis,
     ),

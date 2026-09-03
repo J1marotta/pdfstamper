@@ -9,6 +9,7 @@ import {
 import type { LoadedPdfBundle } from './pdf';
 import {
   buildStampRows,
+  formatStampDate,
   isStampPlaced,
   shouldShowStampImage,
   shouldShowStampOnPage,
@@ -2061,6 +2062,7 @@ function renderStampTable(
 function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
   const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
   const inputClass = row.emphasis ? 'stamp-table-input is-emphasis' : 'stamp-table-input';
+  const inputType = row.inputType ?? 'text';
   return `
     <label class="stamp-table-row is-editable" style="--stamp-row-height:${row.minHeight};">
       <span class="stamp-table-label">${labelHtml}</span>
@@ -2068,7 +2070,7 @@ function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]):
         <input
           class="${inputClass}"
           data-stamp-key="${row.key}"
-          type="text"
+          type="${inputType}"
           value="${escapeAttribute(row.value)}"
           placeholder="${escapeAttribute(row.placeholder)}"
         />
@@ -2080,10 +2082,11 @@ function renderEditableStampRow(row: ReturnType<typeof buildStampRows>[number]):
 function renderReadonlyStampRow(row: ReturnType<typeof buildStampRows>[number]): string {
   const labelHtml = row.labelLines.map((line) => escapeHtml(line)).join('<br />');
   const valueClass = row.emphasis ? 'stamp-table-value is-emphasis' : 'stamp-table-value';
+  const displayValue = row.key === 'date' ? formatStampDate(row.value) : row.value;
   return `
     <div class="stamp-table-row" style="--stamp-row-height:${row.minHeight};">
       <div class="stamp-table-label">${labelHtml}</div>
-      <div class="${valueClass}">${escapeHtml(row.value)}</div>
+      <div class="${valueClass}">${escapeHtml(displayValue)}</div>
     </div>
   `;
 }

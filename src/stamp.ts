@@ -18,6 +18,7 @@ export interface StampRowModel {
   placeholder: string;
   value: string;
   emphasis?: boolean;
+  inputType?: 'text' | 'date';
   maxCharsPerLine: number;
   maxLines: number;
   minHeight: number;
@@ -95,6 +96,7 @@ const STAMP_ROW_DEFINITIONS: Array<
     key: 'date',
     label: 'Date',
     placeholder: 'YYYY-MM-DD',
+    inputType: 'date',
     maxCharsPerLine: 26,
     maxLines: 1,
     minHeight: 28,
@@ -123,6 +125,33 @@ export function isStampPlaced(stamp: StampSettings): boolean {
 
 export function shouldShowStampOnPage(stamp: StampSettings, pageId: string): boolean {
   return stamp.placement.pageId === pageId;
+}
+
+const SHORT_MONTHS = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/** Display an ISO `YYYY-MM-DD` stamp date as `20 May 2026`; anything else passes through. */
+export function formatStampDate(raw: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw.trim());
+  if (!match) {
+    return raw;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day
+  ) {
+    return raw;
+  }
+
+  return `${day} ${SHORT_MONTHS[month - 1]} ${year}`;
 }
 
 export function syncStampFromProfile(

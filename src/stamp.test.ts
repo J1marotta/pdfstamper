@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildStampRows,
+  formatStampDate,
   isStampPlaced,
   shouldShowStampImage,
   shouldShowStampOnPage,
@@ -134,5 +135,19 @@ describe('stamp helpers', () => {
     expect(isStampPlaced(placed)).toBe(true);
     expect(shouldShowStampOnPage(placed, 'pdf-1')).toBe(false);
     expect(shouldShowStampOnPage(placed, 'blank-1')).toBe(true);
+  });
+
+  it('formats ISO stamp dates for display and passes the rest through', () => {
+    expect(formatStampDate('2026-05-20')).toBe('20 May 2026');
+    expect(formatStampDate('2026-01-05')).toBe('5 Jan 2026');
+    expect(formatStampDate('')).toBe('');
+    expect(formatStampDate('May 2026')).toBe('May 2026');
+    expect(formatStampDate('2026-13-01')).toBe('2026-13-01');
+    expect(formatStampDate('2026-02-30')).toBe('2026-02-30');
+  });
+
+  it('exposes the date row as a date input', () => {
+    const rows = buildStampRows(makeStamp());
+    expect(rows.find((row) => row.key === 'date')?.inputType).toBe('date');
   });
 });
