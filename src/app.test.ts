@@ -1601,6 +1601,113 @@ describe('PdfStampStudio shell', () => {
     expect(selectedSettings(internalStudio).placement.x).toBeCloseTo(0.5 + 4 / 595, 6);
   });
 
+  it('moves the selected stamp with arrow keys and ignores typing', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stamps: any;
+        selectedStampId: any;
+      };
+      renderControlState: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'form.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    seedStamp(internalStudio, {
+      placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 300, rotation: 0 },
+    });
+    internalStudio.renderControlState();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
+
+    expect(selectedSettings(internalStudio).placement.y).toBeCloseTo(0.5 - 4 / 842, 6);
+
+    const payeeInput = document.querySelector(
+      '.preview-stamp-object input[data-stamp-key="payee"]',
+    ) as HTMLInputElement;
+    payeeInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+
+    expect(selectedSettings(internalStudio).placement.y).toBeCloseTo(0.5 - 4 / 842, 6);
+  });
+
+  it('moves focus into the sheet on open and back on close', () => {
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        bundle: { fileName: string; pageCount: number } | null;
+        pages: Array<{ id: string; kind: 'pdf'; pageNumber: number; width: number; height: number; label: string }>;
+        previewPageId: string | null;
+        stamps: any;
+        selectedStampId: any;
+      };
+      renderControlState: () => void;
+      renderStampControls: () => void;
+      renderPreviewMeta: () => void;
+      renderPreviewStamp: () => void;
+    };
+
+    internalStudio.state.bundle = {
+      fileName: 'form.pdf',
+      pageCount: 1,
+    };
+    internalStudio.state.pages = [
+      {
+        id: 'pdf-1',
+        kind: 'pdf',
+        pageNumber: 1,
+        width: 595,
+        height: 842,
+        label: 'Page 1',
+      },
+    ];
+    internalStudio.state.previewPageId = 'pdf-1';
+    seedStamp(internalStudio, {
+      placement: { pageId: 'pdf-1', x: 0.5, y: 0.5, width: 300, rotation: 0 },
+    });
+    internalStudio.renderControlState();
+    internalStudio.renderStampControls();
+    internalStudio.renderPreviewMeta();
+    internalStudio.renderPreviewStamp();
+
+    (document.querySelector('[data-action="open-advanced"]') as HTMLButtonElement).click();
+
+    expect(document.activeElement?.textContent).toContain('Close');
+
+    (document.querySelector('#advanced-sheet .advanced-sheet-head .ghost-button') as HTMLButtonElement).click();
+
+    expect(document.activeElement?.getAttribute('data-action')).toBe('open-advanced');
+  });
+
   it('opens the signature dialog and turns the pad into an image stamp', async () => {
     document.body.innerHTML = '<div id="app"></div>';
     const root = document.getElementById('app');

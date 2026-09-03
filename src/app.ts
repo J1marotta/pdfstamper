@@ -343,12 +343,18 @@ export class PdfStampStudio {
       if (action === 'open-advanced') {
         this.state.advancedOpen = true;
         this.renderAdvancedSheetVisibility();
+        this.elements.advancedSheet
+          .querySelector<HTMLButtonElement>('.advanced-sheet-head .ghost-button')
+          ?.focus({ preventScroll: true });
         return;
       }
 
       if (action === 'close-advanced') {
         this.state.advancedOpen = false;
         this.renderAdvancedSheetVisibility();
+        this.root
+          .querySelector<HTMLButtonElement>('[data-action="open-advanced"]')
+          ?.focus({ preventScroll: true });
         return;
       }
 
@@ -969,6 +975,41 @@ export class PdfStampStudio {
         if (this.state.advancedOpen) {
           this.state.advancedOpen = false;
           this.renderAdvancedSheetVisibility();
+        }
+        return;
+      }
+
+      if (
+        event.key === 'ArrowUp' ||
+        event.key === 'ArrowDown' ||
+        event.key === 'ArrowLeft' ||
+        event.key === 'ArrowRight'
+      ) {
+        // Never hijack typing, selecting, or modal dialogs.
+        if (this.state.passwordDialog || this.state.signatureOpen) {
+          return;
+        }
+
+        const target = event.target;
+        const typing =
+          target instanceof HTMLInputElement ||
+          target instanceof HTMLSelectElement ||
+          target instanceof HTMLTextAreaElement ||
+          (target instanceof HTMLElement && target.isContentEditable);
+        if (typing || !this.getSelectedStamp()) {
+          return;
+        }
+
+        event.preventDefault();
+        const step = event.shiftKey ? 20 : 4;
+        if (event.key === 'ArrowUp') {
+          this.nudgeSelectedStamp(0, -step);
+        } else if (event.key === 'ArrowDown') {
+          this.nudgeSelectedStamp(0, step);
+        } else if (event.key === 'ArrowLeft') {
+          this.nudgeSelectedStamp(-step, 0);
+        } else {
+          this.nudgeSelectedStamp(step, 0);
         }
       }
     });
@@ -2772,7 +2813,7 @@ function shellMarkup(): string {
                 </div>
               </div>
             </div>
-            <canvas id="preview-canvas" hidden></canvas>
+            <canvas id="preview-canvas" role="img" aria-label="PDF page preview" hidden></canvas>
             <div id="preview-guides" class="preview-guides" hidden>
               <div class="preview-guide is-vertical"></div>
               <div class="preview-guide is-horizontal"></div>
@@ -2782,7 +2823,7 @@ function shellMarkup(): string {
             <div id="preview-hint" class="preview-hint" hidden></div>
           </div>
           <div id="stamp-controls" class="floating-inspector"></div>
-          <div id="status" class="status"></div>
+          <div id="status" class="status" role="status"></div>
         </section>
       </main>
 
