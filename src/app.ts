@@ -102,6 +102,28 @@ interface ContainerRenderState {
 
 type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
+interface PersistedPreferences {
+  profile: ProfileValues;
+  stamp: Pick<
+    StampSettings,
+    | 'mode'
+    | 'payee'
+    | 'totalAmount'
+    | 'gstAmount'
+    | 'movementNumber'
+    | 'signedBy'
+    | 'coSignedBy'
+    | 'approvedBy1'
+    | 'approvedBy2'
+    | 'date'
+    | 'flatten'
+  >;
+  overwriteExisting: boolean;
+  blankInsertMode: 'after-current' | 'at-end';
+}
+
+const PREFERENCES_STORAGE_KEY = 'pdf-stamp-studio:v1';
+
 interface StampInteraction {
   kind: 'drag' | 'resize' | 'rotate';
   handle?: ResizeHandle;
@@ -211,6 +233,14 @@ export class PdfStampStudio {
       encryptedReadOnly: false,
     };
 
+    const savedPreferences = loadPreferences();
+    if (savedPreferences) {
+      this.state.profile = { ...this.state.profile, ...savedPreferences.profile };
+      this.state.stamp = { ...this.state.stamp, ...savedPreferences.stamp };
+      this.state.overwriteExisting = savedPreferences.overwriteExisting;
+      this.state.blankInsertMode = savedPreferences.blankInsertMode;
+    }
+
     this.bindEvents();
     this.renderAll();
   }
@@ -277,6 +307,7 @@ export class PdfStampStudio {
             mode: 'text',
           };
         }
+        this.persistPreferences();
         this.renderStampControls();
         this.renderPreviewStamp();
         return;
@@ -436,6 +467,7 @@ export class PdfStampStudio {
         [key]: target.value,
       };
       this.invalidateLastExport();
+      this.persistPreferences();
     });
 
     this.elements.previewStamp.addEventListener('pointerdown', (event) => {
@@ -533,9 +565,11 @@ export class PdfStampStudio {
           // The date input fires on every keystroke while the picker is
           // open; re-rendering the inspector here would drop focus and close
           // the picker. The preview overlay reads the same state.
+          this.persistPreferences();
           this.renderPreviewStamp();
           return;
         }
+        this.persistPreferences();
         this.renderStampControls();
         this.renderPreviewStamp();
         return;
@@ -544,6 +578,7 @@ export class PdfStampStudio {
       const uiSetting = target.dataset.uiSetting;
       if (uiSetting === 'blank-insert-mode') {
         this.state.blankInsertMode = target.value === 'at-end' ? 'at-end' : 'after-current';
+        this.persistPreferences();
         this.renderStampControls();
       }
     });
@@ -563,6 +598,7 @@ export class PdfStampStudio {
     this.elements.overwriteToggle.addEventListener('change', () => {
       this.invalidateLastExport();
       this.state.overwriteExisting = this.elements.overwriteToggle.checked;
+      this.persistPreferences();
       this.reapplyProfile();
     });
 
@@ -586,6 +622,7 @@ export class PdfStampStudio {
       this.invalidateLastExport();
       this.state.profile = nextProfile;
       this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
+      this.persistPreferences();
       this.reapplyProfile({ profileFields: false });
       this.renderPreviewStamp();
     });
@@ -633,6 +670,7 @@ export class PdfStampStudio {
         this.state.stamp = syncStampFromProfile(previousProfile, nextProfile, this.state.stamp);
       }
 
+      this.persistPreferences();
       this.reapplyProfile();
       this.renderPreviewStamp();
     };
@@ -983,8 +1021,8 @@ export class PdfStampStudio {
       imageName: file.name,
     };
     this.state.stampImageUrl = URL.createObjectURL(file);
-    this.setNotice(
-      isStampPlaced(this.state.stamp)
+    this.persistPreferences();
+    this.setNotice(      isStampPlaced(this.state.stamp)
         ? `Image added from ${file.name}.`
         : `Image added from ${file.name}. Place the stamp to preview it.`,
       'success',
@@ -1282,6 +1320,7 @@ export class PdfStampStudio {
     this.elements.prevPageButton.disabled = currentIndex <= 0;
     this.elements.nextPageButton.disabled = currentIndex === -1 || currentIndex >= this.state.pages.length - 1;
     this.elements.overwriteToggle.disabled = !this.state.bundle;
+    this.elements.overwriteToggle.checked = this.state.overwriteExisting;
   }
 
   private renderStatus(): void {
@@ -1760,6 +1799,32 @@ export class PdfStampStudio {
     this.elements.previewGuides.style.width = '';
     this.elements.previewGuides.style.height = '';
     this.elements.previewGuides.style.inset = '';
+  }
+
+  private persistPreferences(): void {
+    try {
+      const data: PersistedPreferences = {
+        profile: { ...this.state.profile },
+        stamp: {
+          mode: this.state.stamp.mode,
+          payee: this.state.stamp.payee,
+          totalAmount: this.state.stamp.totalAmount,
+          gstAmount: this.state.stamp.gstAmount,
+          movementNumber: this.state.stamp.movementNumber,
+          signedBy: this.state.stamp.signedBy,
+          coSignedBy: this.state.stamp.coSignedBy,
+          approvedBy1: this.state.stamp.approvedBy1,
+          approvedBy2: this.state.stamp.approvedBy2,
+          date: this.state.stamp.date,
+          flatten: this.state.stamp.flatten,
+        },
+        overwriteExisting: this.state.overwriteExisting,
+        blankInsertMode: this.state.blankInsertMode,
+      };
+      localStorage.setItem(PREFERENCES_STORAGE_KEY, JSON.stringify(data));
+    } catch {
+      // Private browsing etc: persistence is best-effort only.
+    }
   }
 
   private setNotice(message: string, tone: NoticeState['tone']): void {
@@ -2374,6 +2439,69 @@ function inferImageMime(fileName: string): string | null {
 function outputFileName(fileName: string): string {
   const baseName = fileName.replace(/\.pdf$/i, '');
   return `${baseName || 'document'}-stamped.pdf`;
+}
+
+function loadPreferences(): PersistedPreferences | null {
+  try {
+    const raw = localStorage.getItem(PREFERENCES_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<PersistedPreferences>;
+    if (typeof parsed !== 'object' || parsed === null) {
+      return null;
+    }
+
+    const profile: ProfileValues = {};
+    if (typeof parsed.profile === 'object' && parsed.profile !== null) {
+      for (const [key, value] of Object.entries(parsed.profile)) {
+        if (typeof value === 'string' && value) {
+          (profile as Record<string, string>)[key] = value;
+        }
+      }
+    }
+
+    const stampSource = (typeof parsed.stamp === 'object' && parsed.stamp !== null
+      ? parsed.stamp
+      : {}) as Record<string, unknown>;
+    const stampTextKeys = [
+      'payee',
+      'totalAmount',
+      'gstAmount',
+      'movementNumber',
+      'signedBy',
+      'coSignedBy',
+      'approvedBy1',
+      'approvedBy2',
+      'date',
+    ] as const;
+    const stamp = {} as PersistedPreferences['stamp'];
+    for (const key of stampTextKeys) {
+      if (typeof stampSource[key] === 'string') {
+        stamp[key] = stampSource[key] as string;
+      }
+    }
+    if (
+      stampSource.mode === 'text' ||
+      stampSource.mode === 'image' ||
+      stampSource.mode === 'both'
+    ) {
+      stamp.mode = stampSource.mode;
+    }
+    if (typeof stampSource.flatten === 'boolean') {
+      stamp.flatten = stampSource.flatten;
+    }
+
+    return {
+      profile,
+      stamp,
+      overwriteExisting: parsed.overwriteExisting === true,
+      blankInsertMode: parsed.blankInsertMode === 'at-end' ? 'at-end' : 'after-current',
+    };
+  } catch {
+    return null;
+  }
 }
 
 function escapeHtml(value: string): string {

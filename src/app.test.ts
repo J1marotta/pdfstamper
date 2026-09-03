@@ -1294,4 +1294,53 @@ describe('PdfStampStudio shell', () => {
     expect(generateButton).not.toBeNull();
     expect(generateButton?.disabled).toBe(true);
   });
+
+  it('persists profile and stamp preferences across instances without image bytes', () => {
+    localStorage.clear();
+    document.body.innerHTML = '<div id="app"></div>';
+    const root = document.getElementById('app');
+
+    expect(root).not.toBeNull();
+    const studio = new PdfStampStudio(root!);
+    const internalStudio = studio as unknown as {
+      state: {
+        profile: Record<string, string>;
+        stamp: Record<string, unknown>;
+        overwriteExisting: boolean;
+      };
+      persistPreferences: () => void;
+    };
+
+    internalStudio.state.profile = { fullName: 'Taylor Smith' };
+    internalStudio.state.stamp = {
+      ...internalStudio.state.stamp,
+      payee: 'Acme Pty Ltd',
+      imageBytes: new Uint8Array([1, 2, 3]),
+    };
+    internalStudio.state.overwriteExisting = true;
+    internalStudio.persistPreferences();
+
+    const stored = JSON.parse(localStorage.getItem('pdf-stamp-studio:v1') ?? '{}') as Record<string, unknown>;
+    expect((stored.profile as Record<string, string>).fullName).toBe('Taylor Smith');
+    expect((stored.stamp as Record<string, unknown>).payee).toBe('Acme Pty Ltd');
+    expect((stored.stamp as Record<string, unknown>).imageBytes).toBeUndefined();
+
+    document.body.innerHTML = '<div id="app"></div>';
+    const root2 = document.getElementById('app');
+    const studio2 = new PdfStampStudio(root2!);
+    const restored = studio2 as unknown as {
+      state: {
+        profile: Record<string, string>;
+        stamp: Record<string, unknown>;
+        overwriteExisting: boolean;
+      };
+    };
+
+    expect(restored.state.profile.fullName).toBe('Taylor Smith');
+    expect(restored.state.stamp.payee).toBe('Acme Pty Ltd');
+    expect(restored.state.overwriteExisting).toBe(true);
+    expect((document.querySelector('#overwrite-toggle') as HTMLInputElement).checked).toBe(true);
+
+    localStorage.clear();
+  });
 });
